@@ -1,0 +1,11 @@
+cmake_minimum_required(VERSION 3.16)
+project(adas_integration_lab VERSION 0.1.0 LANGUAGES CXX)
+
+add_executable(adas_app src/main.cpp)
+target_compile_features(adas_app PRIVATE cxx_std_17)
+set_target_properties(adas_app PROPERTIES CXX_EXTENSIONS OFF)
+if(MSVC)
+    target_compile_options(adas_app PRIVATE /W4)
+else()
+    target_compile_options(adas_app PRIVATE -Wall -Wextra -Wpedantic)
+endif()
