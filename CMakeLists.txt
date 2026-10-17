@@ -11,7 +11,22 @@ target_link_libraries(adas_app PRIVATE adas_core)
 target_compile_features(adas_app PRIVATE cxx_std_17)
 set_target_properties(adas_app PROPERTIES CXX_EXTENSIONS OFF)
 
-foreach(target adas_core adas_app)
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    add_library(adas_can src/can_receiver.cpp)
+    target_include_directories(adas_can PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include")
+    target_compile_features(adas_can PUBLIC cxx_std_17)
+    set_target_properties(adas_can PROPERTIES CXX_EXTENSIONS OFF)
+
+    target_link_libraries(adas_app PRIVATE adas_can)
+    target_compile_definitions(adas_app PRIVATE ADAS_HAS_SOCKETCAN=1)
+endif()
+
+set(adas_targets adas_core adas_app)
+if(TARGET adas_can)
+    list(APPEND adas_targets adas_can)
+endif()
+
+foreach(target IN LISTS adas_targets)
     if(MSVC)
         target_compile_options(${target} PRIVATE /W4)
     else()
