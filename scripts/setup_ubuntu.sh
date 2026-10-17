@@ -15,7 +15,12 @@ fi
 sudo apt-get update
 sudo apt-get install -y git build-essential cmake python3 python3-pip \
     python3-venv can-utils cppcheck libgtest-dev iproute2 kmod \
-    open-vm-tools open-vm-tools-desktop
+    open-vm-tools
+
+# Desktop integration is unnecessary on Ubuntu Server.
+if dpkg-query -W -f='${Status}' ubuntu-desktop 2>/dev/null | grep -q 'install ok installed'; then
+    sudo apt-get install -y open-vm-tools-desktop
+fi
 
 git --version
 python3 --version
