@@ -2,7 +2,7 @@
 
 Mô phỏng ADAS bằng C++17, Linux SocketCAN và Python; triển khai CI/CT ở các phase sau.
 
-Hiện tại: Phase 3, collision-warning core, Linux SocketCAN raw-frame receiver và DBC-based CAN decoder.
+Hiện tại: Phase 4, collision-warning core, Linux SocketCAN raw-frame receiver, DBC-based CAN decoder và unit tests cho core/decoder.
 
 ## Bắt đầu
 
@@ -87,6 +87,30 @@ RadarObject distance_m=0.00 relative_velocity_mps=0.00 object_valid=0
 ```
 
 `ObjectValid=0` là message radar được giải mã thành công nhưng không có object hợp lệ; nó không tạo cảnh báo và không giống signal ngoài range. Frame có ID lạ hoặc format extended được bỏ qua kèm diagnostic; DLC sai và signal ngoài range được báo trên stderr, receiver vẫn chạy để nhận frame tiếp theo. Chế độ này chỉ decode và log; chưa ghép vehicle/radar state, gọi collision core từ CAN, hoặc quản lý freshness/timeout. `--can` vẫn dành cho xem raw frame, còn CLI ba số vẫn chạy collision core độc lập.
+
+## Phase 4: Unit tests
+
+Trên Ubuntu, cài GoogleTest từ hệ thống (`scripts/setup_ubuntu.sh` đã bao gồm gói này):
+
+```bash
+sudo apt-get update
+sudo apt-get install libgtest-dev
+cmake -S . -B build-phase4 -DCMAKE_BUILD_TYPE=Debug -DBUILD_TESTING=ON
+cmake --build build-phase4 --parallel
+ctest --test-dir build-phase4 -N
+ctest --test-dir build-phase4 --output-on-failure
+```
+
+CTest discover 11 test GoogleTest thuộc hai nhóm `CollisionWarning` và `CanDecoder`. Nếu test fail, CTest in tên case và assertion lỗi; dùng `ctest --test-dir build-phase4 -R CollisionWarning --output-on-failure` (hoặc `CanDecoder`) để chạy riêng nhóm, và `./build-phase4/test_can_decoder --gtest_filter='CanDecoder.RadarVectorsDecodePhysicalSignals'` để chạy một case. Tests dựng `CanFrame` trong bộ nhớ, không cần vcan, sudo hay CAN traffic.
+
+Để build ứng dụng mà không cần GoogleTest:
+
+```bash
+cmake -S . -B build-phase4-no-tests -DCMAKE_BUILD_TYPE=Debug -DBUILD_TESTING=OFF
+cmake --build build-phase4-no-tests --parallel
+```
+
+Phase 4 kiểm tra các ngưỡng TTC, input không hợp lệ, DBC vectors, flags, DLC, ID, format và range của hai decoder. Chưa có simulator, ghép vehicle/radar state, radar watchdog, kiểm thử CAN end-to-end hay pipeline CI/CT.
 
 ## Tài liệu gốc
 

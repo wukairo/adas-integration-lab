@@ -1,5 +1,6 @@
 cmake_minimum_required(VERSION 3.16)
 project(adas_integration_lab VERSION 0.1.0 LANGUAGES CXX)
+include(CTest)
 
 add_library(adas_core src/collision_warning.cpp)
 target_include_directories(adas_core PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include")
@@ -29,6 +30,21 @@ endif()
 set(adas_targets adas_core adas_decoder adas_app)
 if(TARGET adas_can)
     list(APPEND adas_targets adas_can)
+endif()
+
+if(BUILD_TESTING)
+    find_package(GTest CONFIG REQUIRED)
+    include(GoogleTest)
+
+    add_executable(test_collision_warning tests/test_collision_warning.cpp)
+    target_link_libraries(test_collision_warning PRIVATE adas_core GTest::gtest_main)
+    gtest_discover_tests(test_collision_warning)
+
+    add_executable(test_can_decoder tests/test_can_decoder.cpp)
+    target_link_libraries(test_can_decoder PRIVATE adas_decoder GTest::gtest_main)
+    gtest_discover_tests(test_can_decoder)
+
+    list(APPEND adas_targets test_collision_warning test_can_decoder)
 endif()
 
 foreach(target IN LISTS adas_targets)
