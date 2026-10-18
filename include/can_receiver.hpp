@@ -1,17 +1,9 @@
 #pragma once
 
-#include <array>
-#include <cstdint>
+#include "can_frame.hpp"
+
 #include <optional>
 #include <string>
-
-struct CanFrame {
-    // Arbitration ID without SocketCAN flag bits (11-bit standard / 29-bit extended).
-    std::uint32_t id{};
-    std::uint8_t dlc{};
-    std::array<std::uint8_t, 8> data{};
-    bool extended{};
-};
 
 // Receives Classical CAN data frames from a Linux SocketCAN interface.
 // receive() returns an empty optional on timeout, EINTR, RTR/error frames, or

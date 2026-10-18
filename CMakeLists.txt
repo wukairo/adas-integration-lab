@@ -6,8 +6,13 @@ target_include_directories(adas_core PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include
 target_compile_features(adas_core PUBLIC cxx_std_17)
 set_target_properties(adas_core PROPERTIES CXX_EXTENSIONS OFF)
 
+add_library(adas_decoder src/can_decoder.cpp)
+target_include_directories(adas_decoder PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include")
+target_compile_features(adas_decoder PUBLIC cxx_std_17)
+set_target_properties(adas_decoder PROPERTIES CXX_EXTENSIONS OFF)
+
 add_executable(adas_app src/main.cpp)
-target_link_libraries(adas_app PRIVATE adas_core)
+target_link_libraries(adas_app PRIVATE adas_core adas_decoder)
 target_compile_features(adas_app PRIVATE cxx_std_17)
 set_target_properties(adas_app PROPERTIES CXX_EXTENSIONS OFF)
 
@@ -21,7 +26,7 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     target_compile_definitions(adas_app PRIVATE ADAS_HAS_SOCKETCAN=1)
 endif()
 
-set(adas_targets adas_core adas_app)
+set(adas_targets adas_core adas_decoder adas_app)
 if(TARGET adas_can)
     list(APPEND adas_targets adas_can)
 endif()

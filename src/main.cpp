@@ -1,8 +1,10 @@
 #include "collision_warning.hpp"
+#include "can_decoder.hpp"
 
 #include <exception>
 #include <iomanip>
 #include <iostream>
+#include <locale>
 #include <sstream>
 #include <string>
 
@@ -19,12 +21,18 @@ void requestStop(int) {
     stop_requested = 1;
 }
 
-void printFrame(const CanFrame& frame) {
+std::ostringstream formatCanId(const CanFrame& frame) {
     std::ostringstream output;
+    output.imbue(std::locale::classic());
     output << "CAN id=0x" << std::uppercase << std::hex << std::setfill('0')
            << std::setw(frame.extended ? 8 : 3) << frame.id << " format="
            << (frame.extended ? "extended" : "standard") << " dlc="
            << std::dec << static_cast<unsigned int>(frame.dlc) << " data=";
+    return output;
+}
+
+void printFrame(const CanFrame& frame) {
+    std::ostringstream output = formatCanId(frame);
     for (std::size_t index = 0; index < frame.dlc; ++index) {
         if (index != 0) {
             output << ' ';
@@ -35,7 +43,76 @@ void printFrame(const CanFrame& frame) {
     std::cout << output.str() << '\n' << std::flush;
 }
 
-int runCanReceiver(const std::string& interface_name) {
+std::string canId(const CanFrame& frame) {
+    std::ostringstream output;
+    output.imbue(std::locale::classic());
+    output << "0x" << std::uppercase << std::hex << std::setfill('0')
+           << std::setw(frame.extended ? 8 : 3) << frame.id;
+    return output.str();
+}
+
+void printDecodeDiagnostic(const char* category, const char* reason,
+                           const CanFrame& frame) {
+    std::cerr << category << " reason=" << reason << " id=" << canId(frame)
+              << '\n';
+}
+
+void printDecodedFrame(const CanFrame& frame) {
+    if (frame.extended) {
+        printDecodeDiagnostic("DECODE_IGNORED", "UNSUPPORTED_FORMAT", frame);
+        return;
+    }
+    if (frame.id != 0x100 && frame.id != 0x200) {
+        printDecodeDiagnostic("DECODE_IGNORED", "UNKNOWN_ID", frame);
+        return;
+    }
+
+    std::ostringstream output;
+    output.imbue(std::locale::classic());
+    output << std::fixed << std::setprecision(2);
+    if (frame.id == 0x100) {
+        const auto result = decodeVehicleState(frame);
+        if (const auto* state = std::get_if<VehicleState>(&result)) {
+            output << "VehicleState speed_kmh=" << state->speed_kmh
+                   << " steering_angle_deg=" << state->steering_angle_deg
+                   << " brake_pressed=" << (state->brake_pressed ? 1 : 0);
+            std::cout << output.str() << '\n' << std::flush;
+            return;
+        }
+        const auto error = std::get<DecodeError>(result);
+        if (error == DecodeError::WrongDlc) {
+            printDecodeDiagnostic("DECODE_ERROR", "WRONG_DLC", frame);
+        } else if (error == DecodeError::OutOfRange) {
+            printDecodeDiagnostic("INVALID_INPUT", "OUT_OF_RANGE", frame);
+        } else if (error == DecodeError::UnsupportedFormat) {
+            printDecodeDiagnostic("DECODE_IGNORED", "UNSUPPORTED_FORMAT", frame);
+        } else {
+            printDecodeDiagnostic("DECODE_IGNORED", "UNKNOWN_ID", frame);
+        }
+        return;
+    }
+
+    const auto result = decodeRadarObject(frame);
+    if (const auto* object = std::get_if<RadarObject>(&result)) {
+        output << "RadarObject distance_m=" << object->distance_m
+               << " relative_velocity_mps=" << object->relative_velocity_mps
+               << " object_valid=" << (object->object_valid ? 1 : 0);
+        std::cout << output.str() << '\n' << std::flush;
+        return;
+    }
+    const auto error = std::get<DecodeError>(result);
+    if (error == DecodeError::WrongDlc) {
+        printDecodeDiagnostic("DECODE_ERROR", "WRONG_DLC", frame);
+    } else if (error == DecodeError::OutOfRange) {
+        printDecodeDiagnostic("INVALID_INPUT", "OUT_OF_RANGE", frame);
+    } else if (error == DecodeError::UnsupportedFormat) {
+        printDecodeDiagnostic("DECODE_IGNORED", "UNSUPPORTED_FORMAT", frame);
+    } else {
+        printDecodeDiagnostic("DECODE_IGNORED", "UNKNOWN_ID", frame);
+    }
+}
+
+int runCanReceiver(const std::string& interface_name, bool decode_mode) {
     struct sigaction action{};
     action.sa_handler = requestStop;
     sigemptyset(&action.sa_mask);
@@ -51,7 +128,11 @@ int runCanReceiver(const std::string& interface_name) {
         while (stop_requested == 0) {
             const auto frame = receiver.receive(200);
             if (frame.has_value()) {
-                printFrame(*frame);
+                if (decode_mode) {
+                    printDecodedFrame(*frame);
+                } else {
+                    printFrame(*frame);
+                }
             }
         }
         return 0;
@@ -61,6 +142,12 @@ int runCanReceiver(const std::string& interface_name) {
     }
 }
 #endif
+
+void printUsage() {
+    std::cerr << "Usage: adas_app <speed_kmh> <distance_m> <closing_speed_mps>\n"
+                 "       adas_app --can <interface>\n"
+                 "       adas_app --decode <interface>\n";
+}
 
 const char* warningLevelName(WarningLevel level) {
     switch (level) {
@@ -89,28 +176,41 @@ int main(int argc, char* argv[]) {
 #ifdef ADAS_HAS_SOCKETCAN
     if (argc >= 2 && std::string(argv[1]) == "--can") {
         if (argc != 3) {
-            std::cerr << "Usage: adas_app <speed_kmh> <distance_m> <closing_speed_mps>\n"
-                         "       adas_app --can <interface>\n";
+            printUsage();
             return 2;
         }
         stop_requested = 0;
-        return runCanReceiver(argv[2]);
+        return runCanReceiver(argv[2], false);
+    }
+    if (argc >= 2 && std::string(argv[1]) == "--decode") {
+        if (argc != 3) {
+            printUsage();
+            return 2;
+        }
+        stop_requested = 0;
+        return runCanReceiver(argv[2], true);
     }
 #else
     if (argc >= 2 && std::string(argv[1]) == "--can") {
         if (argc != 3) {
-            std::cerr << "Usage: adas_app <speed_kmh> <distance_m> <closing_speed_mps>\n"
-                         "       adas_app --can <interface>\n";
+            printUsage();
             return 2;
         }
         std::cerr << "CAN mode is not supported on this platform\n";
         return 1;
     }
+    if (argc >= 2 && std::string(argv[1]) == "--decode") {
+        if (argc != 3) {
+            printUsage();
+            return 2;
+        }
+        std::cerr << "CAN decode mode is not supported on this platform\n";
+        return 1;
+    }
 #endif
 
     if (argc != 4) {
-        std::cerr << "Usage: adas_app <speed_kmh> <distance_m> <closing_speed_mps>\n"
-                     "       adas_app --can <interface>\n";
+        printUsage();
         return 2;
     }
 

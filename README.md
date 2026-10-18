@@ -2,7 +2,7 @@
 
 Mô phỏng ADAS bằng C++17, Linux SocketCAN và Python; triển khai CI/CT ở các phase sau.
 
-Hiện tại: Phase 2, collision-warning core và Linux SocketCAN raw-frame receiver.
+Hiện tại: Phase 3, collision-warning core, Linux SocketCAN raw-frame receiver và DBC-based CAN decoder.
 
 ## Bắt đầu
 
@@ -54,6 +54,39 @@ cansend vcan0 123#R
 Mỗi Classical CAN data frame hợp lệ được in thành một dòng và flush ngay. Ví dụ: `CAN id=0x123 format=standard dlc=8 data=01 02 03 04 05 06 07 08`. ID standard hiển thị 3 chữ số hex, ID extended 8 chữ số; byte hiển thị 2 chữ số hex viết hoa. DLC 0 có dạng `data=`. `dlc` trong output là payload length SocketCAN (0–8); wire DLC 9–15 là dạng hợp lệ chỉ khi payload dài 8 byte và được Linux biểu diễn riêng qua `len8_dlc`. Metadata `len8_dlc` sai bị bỏ qua kèm diagnostic stderr. RTR và error frames bị bỏ qua. Phase này chỉ nhận raw frames: chưa giải mã DBC và chưa đưa dữ liệu CAN vào collision-warning core.
 
 `Ctrl+C` hoặc `SIGTERM` dừng receiver bình thường với mã thoát 0. Lỗi CAN/interface trả mã 1; sai cú pháp trả mã 2. `--can` cần interface đang tồn tại và bind được. Nếu `vcan` module không có trong kernel hoặc thiếu quyền thiết lập interface, script sẽ báo lỗi; kiểm tra `ip -details link show vcan0` sau khi cấu hình. Các lệnh gửi cần `can-utils` (`cansend`).
+
+## Phase 3: DBC và decoded CAN signals
+
+[`dbc/vehicle.dbc`](dbc/vehicle.dbc) định nghĩa hai standard Classical CAN message, mỗi message dài 8 byte:
+
+| Message | ID | Signals |
+| --- | ---: | --- |
+| `VehicleState` | `0x100` | `VehicleSpeed` (km/h), `SteeringAngle` (deg), `BrakeStatus` |
+| `RadarObject` | `0x200` | `ObjectDistance` (m), `RelativeVelocity` (m/s), `ObjectValid` |
+
+Các signal số dùng Intel little-endian. `RelativeVelocity` dương nghĩa là đang tiến gần vật cản; âm nghĩa là đang ra xa. Chạy receiver ở Terminal 1:
+
+```bash
+./build/adas_app --decode vcan0
+```
+
+Gửi message ở Terminal 2:
+
+```bash
+cansend vcan0 100#200383FF01000000
+cansend vcan0 200#C800BC0201000000
+cansend vcan0 200#0000000000000000
+```
+
+Output tương ứng:
+
+```text
+VehicleState speed_kmh=80.00 steering_angle_deg=-12.50 brake_pressed=1
+RadarObject distance_m=20.00 relative_velocity_mps=7.00 object_valid=1
+RadarObject distance_m=0.00 relative_velocity_mps=0.00 object_valid=0
+```
+
+`ObjectValid=0` là message radar được giải mã thành công nhưng không có object hợp lệ; nó không tạo cảnh báo và không giống signal ngoài range. Frame có ID lạ hoặc format extended được bỏ qua kèm diagnostic; DLC sai và signal ngoài range được báo trên stderr, receiver vẫn chạy để nhận frame tiếp theo. Chế độ này chỉ decode và log; chưa ghép vehicle/radar state, gọi collision core từ CAN, hoặc quản lý freshness/timeout. `--can` vẫn dành cho xem raw frame, còn CLI ba số vẫn chạy collision core độc lập.
 
 ## Tài liệu gốc
 
