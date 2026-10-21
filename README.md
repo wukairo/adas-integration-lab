@@ -2,7 +2,7 @@
 
 Mô phỏng ADAS bằng C++17, Linux SocketCAN và Python; triển khai CI/CT ở các phase sau.
 
-Hiện tại: Phase 4, collision-warning core, Linux SocketCAN raw-frame receiver, DBC-based CAN decoder và unit tests cho core/decoder.
+Hiện tại: Phase 5, collision-warning core, Linux SocketCAN raw-frame receiver, DBC-based CAN decoder, Python CAN simulator và unit tests cho core/decoder/simulator.
 
 ## Bắt đầu
 
@@ -110,7 +110,53 @@ cmake -S . -B build-phase4-no-tests -DCMAKE_BUILD_TYPE=Debug -DBUILD_TESTING=OFF
 cmake --build build-phase4-no-tests --parallel
 ```
 
-Phase 4 kiểm tra các ngưỡng TTC, input không hợp lệ, DBC vectors, flags, DLC, ID, format và range của hai decoder. Chưa có simulator, ghép vehicle/radar state, radar watchdog, kiểm thử CAN end-to-end hay pipeline CI/CT.
+Phase 4 kiểm tra các ngưỡng TTC, input không hợp lệ, DBC vectors, flags, DLC, ID, format và range của hai decoder. Khi kết thúc Phase 4, simulator chưa có; ghép vehicle/radar state, radar watchdog, kiểm thử CAN end-to-end và pipeline CI/CT vẫn thuộc phase sau.
+
+## Phase 5: Python CAN simulator
+
+Simulator dùng `python-can` và `cantools`, encode trực tiếp từ [`dbc/vehicle.dbc`](dbc/vehicle.dbc), rồi gửi standard Classical CAN frames qua SocketCAN. Cài dependency trong virtual environment:
+
+```bash
+python3 -m venv .venv
+.venv/bin/python -m pip install -r requirements.txt
+bash scripts/setup_vcan.sh
+```
+
+Chạy một scenario mỗi lần; mặc định gửi 100 ms trong 3 giây trên `vcan0`:
+
+```bash
+.venv/bin/python scripts/simulate_can.py --scenario normal
+.venv/bin/python scripts/simulate_can.py --scenario warning
+.venv/bin/python scripts/simulate_can.py --scenario critical
+.venv/bin/python scripts/simulate_can.py --scenario radar_timeout
+.venv/bin/python scripts/simulate_can.py --scenario invalid_signal
+```
+
+Có thể đổi interface, DBC, chu kỳ và thời lượng. `radar_timeout` nhận thêm `--warmup-s` (mặc định 1 giây), còn scenario khác không nhận cờ này:
+
+```bash
+.venv/bin/python scripts/simulate_can.py --scenario warning --interface vcan0 --period-ms 50 --duration-s 2
+.venv/bin/python scripts/simulate_can.py --scenario radar_timeout --warmup-s 1 --duration-s 3
+.venv/bin/python scripts/simulate_can.py --scenario normal --dbc /path/to/vehicle.dbc
+```
+
+Scenario `normal`, `warning`, `critical` lần lượt encode `(speed, distance, relative velocity)` thành `(50, 100, 0)`, `(80, 20, 7)`, `(80, 10, 10)`. `radar_timeout` gửi cả `VehicleState` và `RadarObject` trong warmup; sau đó giữ `VehicleState` nhưng im lặng radar ít nhất 1 giây. `invalid_signal` chủ ý phát `VehicleSpeed=301 km/h` để decoder hiện tại ghi `INVALID_INPUT reason=OUT_OF_RANGE id=0x100`; các scenario bình thường vẫn kiểm tra strict range. Relative velocity dương là tốc độ tiến gần, không trừ vehicle speed thêm lần nữa.
+
+Để quan sát frame và decode signals, khởi chạy receiver trước simulator:
+
+```bash
+./build-phase4/adas_app --decode vcan0
+```
+
+Simulator in `SIM_START`, từng `SIM_TX` với ID/DLC/payload và `SIM_STOP` với số frame gửi thành công. Mã thoát `0` là hoàn thành hoặc dừng bằng SIGINT/SIGTERM, `1` là dependency/DBC/interface/send failure, `2` là CLI hoặc timing không hợp lệ. Có thể gọi từ thư mục khác; DBC mặc định được tìm theo vị trí script. Script không tạo interface và không chạy bằng sudo.
+
+Contract tests không cần `vcan0`:
+
+```bash
+.venv/bin/python -m unittest discover -s tests -p 'test_simulate_can.py' -v
+```
+
+Phase 5 chỉ cung cấp traffic mô phỏng và kiểm tra encoding/timing. Ứng dụng hiện tại vẫn chưa ghép state CAN vào collision core hoặc triển khai watchdog 500 ms; xác nhận `NONE/WARNING/CRITICAL/RADAR_TIMEOUT` từ CAN và test end-to-end thuộc Phase 6.
 
 ## Tài liệu gốc
 

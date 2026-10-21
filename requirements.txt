@@ -1,0 +1,2 @@
+python-can==4.6.1
+cantools==40.7.1
