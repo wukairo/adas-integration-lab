@@ -1,0 +1,68 @@
+name: Quick CI
+
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: quick-ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-and-test:
+    name: quick-ci
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes cmake g++ make libgtest-dev python3-venv
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install Python dependencies
+        run: |
+          python -m venv .venv
+          .venv/bin/python -m pip install --upgrade pip
+          .venv/bin/python -m pip install -r requirements.txt
+
+      - name: Prepare report directory
+        run: mkdir -p build-ci/reports/ci
+
+      - name: Configure CMake
+        run: |
+          set -o pipefail
+          cmake -S . -B build-ci -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON \
+            2>&1 | tee build-ci/reports/ci/configure.log
+
+      - name: Build
+        run: |
+          set -o pipefail
+          cmake --build build-ci --parallel 2 \
+            2>&1 | tee build-ci/reports/ci/build.log
+
+      - name: Run C++ and Python unit tests
+        run: >-
+          .venv/bin/python scripts/run_tests.py --suite unit
+          --build-dir build-ci --run-dir build-ci/reports/ci/unit
+
+      - name: Upload reports and logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: quick-ci-reports-${{ github.run_id }}-${{ github.run_attempt }}
+          path: build-ci/reports/ci/
+          if-no-files-found: warn
+          retention-days: 14
