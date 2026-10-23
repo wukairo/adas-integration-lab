@@ -2,7 +2,7 @@
 
 Mô phỏng ADAS bằng C++17, Linux SocketCAN và Python; triển khai CI/CT ở các phase sau.
 
-Hiện tại: Phase 5, collision-warning core, Linux SocketCAN raw-frame receiver, DBC-based CAN decoder, Python CAN simulator và unit tests cho core/decoder/simulator.
+Hiện tại: Phase 6, gồm collision-warning core, Linux SocketCAN receiver, DBC decoder, Python simulator, ADAS runtime với freshness/watchdog và năm end-to-end scenario scripts.
 
 ## Bắt đầu
 
@@ -156,7 +156,31 @@ Contract tests không cần `vcan0`:
 .venv/bin/python -m unittest discover -s tests -p 'test_simulate_can.py' -v
 ```
 
-Phase 5 chỉ cung cấp traffic mô phỏng và kiểm tra encoding/timing. Ứng dụng hiện tại vẫn chưa ghép state CAN vào collision core hoặc triển khai watchdog 500 ms; xác nhận `NONE/WARNING/CRITICAL/RADAR_TIMEOUT` từ CAN và test end-to-end thuộc Phase 6.
+Ở cuối Phase 5, ứng dụng chưa ghép state CAN vào collision core hoặc triển khai watchdog; các khả năng này được bổ sung ở Phase 6 bên dưới.
+
+## Phase 6: ADAS runtime và end-to-end integration tests
+
+`--adas` nhận `VehicleState` và `RadarObject`, ghép state mới nhất, gọi collision core, và phát event chuyển trạng thái. Radar phải được cập nhật trong 500 ms; vehicle cũng có freshness timeout 500 ms để tránh dùng speed cũ. Timestamp dùng `steady_clock`. `ObjectValid=0` là message radar hợp lệ, refresh watchdog và tạo `WarningLevel=NONE reason=NO_OBJECT`. Frame out-of-range hoặc sai DLC làm nguồn tương ứng invalid tới khi có frame hợp lệ thay thế.
+
+```bash
+cmake -S . -B build-phase6 -DCMAKE_BUILD_TYPE=Debug -DBUILD_TESTING=ON
+cmake --build build-phase6 --parallel
+./build-phase6/adas_app --adas vcan0
+```
+
+Runtime in `ADAS_READY` sau khi bind SocketCAN thành công, sau đó in `ADAS_STATE` mỗi khi state đổi. State OK có trường `WarningLevel=NONE|WARNING|CRITICAL`; state lỗi không có trường này. Diagnostic decode được ghi lên stderr. Khi radar timeout, event có `radar_age_ms` và `last_radar_ms` (hoặc `radar_seen=0` nếu chưa nhận radar). `SIGINT`/`SIGTERM` dừng app với mã 0.
+
+Năm integration tests khởi chạy app và simulator riêng, xác nhận output của chính app, lưu log và dọn process khi kết thúc. Cần interface `vcan` đang UP; tests không tạo interface, không dùng sudo và không chạy song song trên cùng bus:
+
+```bash
+.venv/bin/python integration/normal_drive.py --app build-phase6/adas_app
+.venv/bin/python integration/collision_warning.py --app build-phase6/adas_app
+.venv/bin/python integration/critical_collision.py --app build-phase6/adas_app
+.venv/bin/python integration/missing_message.py --app build-phase6/adas_app
+.venv/bin/python integration/invalid_signal.py --app build-phase6/adas_app
+```
+
+Mỗi lần chạy tạo thư mục log riêng dưới `build-phase6/integration-logs/`, gồm app stdout/stderr, simulator stdout/stderr và summary. CMake unit suite gồm thêm deterministic tests cho runtime; có thể chạy bằng `ctest --test-dir build-phase6 --output-on-failure`. Nếu thiếu vcan/kernel capability, unit tests vẫn chạy được nhưng không thay thế live SocketCAN integration gate.
 
 ## Tài liệu gốc
 
