@@ -143,6 +143,24 @@ class SchedulerTests(unittest.TestCase):
         self.assertGreaterEqual(len(vehicle_times), 2)
         self.assertGreaterEqual(vehicle_times[1] - vehicle_times[0], 0.4)
 
+    def test_small_sleep_overshoot_does_not_skip_every_period(self):
+        config = simulate_can.Config("normal", "vcan0", Path("unused"), 100, 0.6, None)
+        clock = FakeClock()
+        bus = FakeBus(clock)
+
+        def slightly_late_sleep(seconds):
+            clock.now += seconds + 0.001
+
+        with mock.patch.object(simulate_can, "_message", side_effect=lambda frame_id, data: types.SimpleNamespace(
+                arbitration_id=frame_id, data=data)):
+            simulate_can.run_schedule(
+                config, b"\0" * 8, b"\1" * 8, bus,
+                clock=clock.monotonic, sleep=slightly_late_sleep,
+            )
+        vehicle_times = [when for (frame_id, _), when in zip(bus.messages, bus.sent_times) if frame_id == 0x100]
+        self.assertGreaterEqual(len(vehicle_times), 5)
+        self.assertLessEqual(max(vehicle_times[i + 1] - vehicle_times[i] for i in range(len(vehicle_times) - 1)), 0.11)
+
     def test_send_failure_raises_and_runtime_closes_bus(self):
         config = simulate_can.Config("normal", "vcan0", Path("unused"), 100, 0.2, None)
         bus = FakeBus(fail=True)

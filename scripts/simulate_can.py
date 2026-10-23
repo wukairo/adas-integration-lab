@@ -245,7 +245,9 @@ def run_schedule(
             break
         deadline = start + next_tick * period
         if next_tick > 0 and now > deadline:
-            next_tick = math.floor(elapsed / period) + 1
+            elapsed_tick = math.floor(elapsed / period)
+            if elapsed_tick > next_tick:
+                next_tick = elapsed_tick + 1
             deadline = start + next_tick * period
         if now < deadline:
             sleep(min(deadline - now, start + duration - now, 0.1))

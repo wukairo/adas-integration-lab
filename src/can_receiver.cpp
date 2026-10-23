@@ -139,9 +139,10 @@ std::optional<CanFrame> CanReceiver::receive(int timeout_ms) {
         return std::nullopt;
     }
     if (raw_frame.len8_dlc != 0 &&
-        (raw_frame.can_dlc != CAN_MAX_DLEN ||
-         raw_frame.len8_dlc <= CAN_MAX_DLC ||
-         raw_frame.len8_dlc > CAN_MAX_RAW_DLC)) {
+        raw_frame.len8_dlc != raw_frame.can_dlc &&
+        !(raw_frame.can_dlc == CAN_MAX_DLEN &&
+          raw_frame.len8_dlc > CAN_MAX_DLC &&
+          raw_frame.len8_dlc <= CAN_MAX_RAW_DLC)) {
         discardFrame("invalid len8_dlc metadata", interface_name_);
         return std::nullopt;
     }
