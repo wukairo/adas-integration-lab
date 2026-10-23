@@ -2,7 +2,7 @@
 
 Mô phỏng ADAS bằng C++17, Linux SocketCAN và Python; triển khai CI/CT ở các phase sau.
 
-Hiện tại: Phase 6, gồm collision-warning core, Linux SocketCAN receiver, DBC decoder, Python simulator, ADAS runtime với freshness/watchdog và năm end-to-end scenario scripts.
+Hiện tại: Phase 6 runtime với freshness/watchdog và năm end-to-end scenarios; Phase 7 bổ sung local build/test automation, cppcheck gate và regression reports.
 
 ## Bắt đầu
 
@@ -181,6 +181,57 @@ Năm integration tests khởi chạy app và simulator riêng, xác nhận outpu
 ```
 
 Mỗi lần chạy tạo thư mục log riêng dưới `build-phase6/integration-logs/`, gồm app stdout/stderr, simulator stdout/stderr và summary. CMake unit suite gồm thêm deterministic tests cho runtime; có thể chạy bằng `ctest --test-dir build-phase6 --output-on-failure`. Nếu thiếu vcan/kernel capability, unit tests vẫn chạy được nhưng không thay thế live SocketCAN integration gate.
+
+## Phase 7: Local automation và static analysis
+
+Các wrapper xác định repo từ vị trí script và ghi report/log riêng cho mỗi invocation. Chúng không cài dependency, không dùng `sudo`, và đường dẫn tương đối truyền vào CLI được tính từ working directory hiện tại.
+
+Chuẩn bị Python dependencies và tool hệ thống một lần:
+
+```bash
+.venv/bin/python -m pip install -r requirements.txt
+sudo apt-get install cmake g++ make libgtest-dev cppcheck iproute2 can-utils
+```
+
+Build Debug, chạy CTest mặc định và lưu artifacts dưới `build/reports/<run-id>/`:
+
+```bash
+.venv/bin/python scripts/build.py
+.venv/bin/python scripts/build.py --build-type Release --build-dir build-release --clean
+```
+
+`--clean` chỉ chấp nhận build directory có CMake cache thuộc repo này hoặc directory mới. Dùng `--skip-tests` khi cần tách CTest khỏi build; `--jobs N` đổi mức song song. Build dừng ở stage lỗi và trả exit code command dương, wrapper/dependency error là `1`, CLI error là `2`.
+
+Chạy unit suite không cần `vcan0`, live integration suite, hoặc tất cả suite:
+
+```bash
+.venv/bin/python scripts/run_tests.py --suite unit --build-dir build
+bash scripts/setup_vcan.sh
+.venv/bin/python scripts/run_tests.py --suite integration --build-dir build --scenario warning --scenario critical
+.venv/bin/python scripts/run_tests.py --suite all --build-dir build
+```
+
+Runner không tự build. Cần chạy build trước và, với integration, cung cấp app executable, `python-can`/`cantools`, cùng interface `vcan` đang UP. Scenario chạy tuần tự; thiếu prerequisite tạo error và không bị lặng lẽ skip. `summary.json` chứa suite results, exit codes, durations, reasons và log paths. Integration artifacts được đặt trong `integration/<scenario>-<run-id>/`.
+
+Cppcheck gate quét production `src/` và `include/`:
+
+```bash
+.venv/bin/python scripts/static_analysis.py
+```
+
+Gate bật severity `warning` và `performance`; diagnostic trong gate hoặc cppcheck không chạy được làm lệnh trả `1`. Report ghi phiên bản cppcheck. Phân tích dùng host defaults và headers hiện có; các nhánh Linux SocketCAN được xét theo platform/preprocessor của host, nên kết quả không thay thế build trên Linux.
+
+Regression entrypoint chạy build → cppcheck → tests, gom report con trong cùng thư mục invocation:
+
+```bash
+PYTHON=.venv/bin/python ./scripts/regression_test.sh --suite quick
+PYTHON=.venv/bin/python ./scripts/regression_test.sh --suite full
+PYTHON=.venv/bin/python ./scripts/regression_test.sh --suite full --bisect
+```
+
+`quick` chạy C++/Python unit tests, không cần CAN; `full` thêm năm live scenarios. `--bisect` dùng `build-bisect/`, clean guarded build artifacts ở mỗi lần chạy, và ghi report bên cạnh build directory (`build-bisect-reports/`) để giữ log invocation đang chạy. Nó trả `125` chỉ khi preflight thiếu prerequisite; build/test/quality failure trả `1`, interrupt giữ mã `130`/`143`. Nếu chỉ gọi `regression_test.sh` không truyền `PYTHON`, wrapper dùng `python3` từ môi trường.
+
+Mỗi lần gọi tạo report directory duy nhất dưới `<build-dir>/reports/`, in đường dẫn lúc bắt đầu và kết thúc. `summary.json` của regression tổng hợp trạng thái `preflight`, `build`, `static_analysis`, `tests`; mỗi stage có report riêng trong cùng run directory. Với integration errors, xem app/simulator stdout và stderr, rồi kiểm tra interface bằng `ip -details link show vcan0`.
 
 ## Tài liệu gốc
 
