@@ -99,18 +99,30 @@ class SchedulerTests(unittest.TestCase):
     def schedule(self, config, sleep=None, fail=False):
         clock = FakeClock()
         bus = FakeBus(clock, fail)
-        with mock.patch.object(simulate_can, "_message", side_effect=lambda frame_id, data: types.SimpleNamespace(
-                arbitration_id=frame_id, data=data)), \
-                mock.patch.object(simulate_can, "_log"):
+        with (
+            mock.patch.object(
+                simulate_can,
+                "_message",
+                side_effect=lambda frame_id, data: types.SimpleNamespace(
+                    arbitration_id=frame_id, data=data
+                ),
+            ),
+            mock.patch.object(simulate_can, "_log"),
+        ):
             reason, vehicles, radars = simulate_can.run_schedule(
-                config, b"\x00" * 8, b"\x01" * 8, bus,
+                config,
+                b"\x00" * 8,
+                b"\x01" * 8,
+                bus,
                 clock=clock.monotonic,
                 sleep=sleep or clock.sleep,
             )
         return bus, (reason, vehicles, radars)
 
     def test_radar_stops_after_warmup_while_vehicle_continues(self):
-        config = simulate_can.Config("radar_timeout", "vcan0", Path("unused"), 100, 1.3, 0.2)
+        config = simulate_can.Config(
+            "radar_timeout", "vcan0", Path("unused"), 100, 1.3, 0.2
+        )
         bus, summary = self.schedule(config)
         ids = [frame_id for frame_id, _ in bus.messages]
         self.assertEqual(ids[:4], [0x100, 0x200, 0x100, 0x200])
@@ -129,11 +141,20 @@ class SchedulerTests(unittest.TestCase):
             clock.now += seconds + (0.35 if calls == 1 else 0)
 
         bus = FakeBus(clock)
-        with mock.patch.object(simulate_can, "_message", side_effect=lambda frame_id, data: types.SimpleNamespace(
-                arbitration_id=frame_id, data=data)):
+        with mock.patch.object(
+            simulate_can,
+            "_message",
+            side_effect=lambda frame_id, data: types.SimpleNamespace(
+                arbitration_id=frame_id, data=data
+            ),
+        ):
             simulate_can.run_schedule(
-                config, b"\0" * 8, b"\1" * 8, bus,
-                clock=clock.monotonic, sleep=delayed_sleep,
+                config,
+                b"\0" * 8,
+                b"\1" * 8,
+                bus,
+                clock=clock.monotonic,
+                sleep=delayed_sleep,
             )
         vehicle_times = [
             bus.sent_times[i]
@@ -151,23 +172,49 @@ class SchedulerTests(unittest.TestCase):
         def slightly_late_sleep(seconds):
             clock.now += seconds + 0.001
 
-        with mock.patch.object(simulate_can, "_message", side_effect=lambda frame_id, data: types.SimpleNamespace(
-                arbitration_id=frame_id, data=data)):
+        with mock.patch.object(
+            simulate_can,
+            "_message",
+            side_effect=lambda frame_id, data: types.SimpleNamespace(
+                arbitration_id=frame_id, data=data
+            ),
+        ):
             simulate_can.run_schedule(
-                config, b"\0" * 8, b"\1" * 8, bus,
-                clock=clock.monotonic, sleep=slightly_late_sleep,
+                config,
+                b"\0" * 8,
+                b"\1" * 8,
+                bus,
+                clock=clock.monotonic,
+                sleep=slightly_late_sleep,
             )
-        vehicle_times = [when for (frame_id, _), when in zip(bus.messages, bus.sent_times) if frame_id == 0x100]
+        vehicle_times = [
+            when
+            for (frame_id, _), when in zip(bus.messages, bus.sent_times)
+            if frame_id == 0x100
+        ]
         self.assertGreaterEqual(len(vehicle_times), 5)
-        self.assertLessEqual(max(vehicle_times[i + 1] - vehicle_times[i] for i in range(len(vehicle_times) - 1)), 0.11)
+        self.assertLessEqual(
+            max(
+                vehicle_times[i + 1] - vehicle_times[i]
+                for i in range(len(vehicle_times) - 1)
+            ),
+            0.11,
+        )
 
     def test_send_failure_raises_and_runtime_closes_bus(self):
         config = simulate_can.Config("normal", "vcan0", Path("unused"), 100, 0.2, None)
         bus = FakeBus(fail=True)
         simulate_can.load_and_validate_dbc(ROOT / "dbc" / "vehicle.dbc")
-        with mock.patch.object(can, "Bus", return_value=bus), \
-                mock.patch.object(simulate_can, "_message", side_effect=lambda frame_id, data: types.SimpleNamespace(
-                    arbitration_id=frame_id, data=data)):
+        with (
+            mock.patch.object(can, "Bus", return_value=bus),
+            mock.patch.object(
+                simulate_can,
+                "_message",
+                side_effect=lambda frame_id, data: types.SimpleNamespace(
+                    arbitration_id=frame_id, data=data
+                ),
+            ),
+        ):
             with self.assertRaises(simulate_can.SimulatorError):
                 simulate_can.run(config, ROOT / "dbc" / "vehicle.dbc")
         self.assertTrue(bus.closed)
