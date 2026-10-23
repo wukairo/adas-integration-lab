@@ -45,8 +45,8 @@ def parser(description: str) -> argparse.ArgumentParser:
     return result
 
 
-def _validate(args: argparse.Namespace) -> tuple[Path, Path]:
-    app = args.app if args.app.is_absolute() else Path.cwd() / args.app
+def _validate(app_arg: Path, interface: str) -> Path:
+    app = app_arg if app_arg.is_absolute() else Path.cwd() / app_arg
     app = app.resolve()
     if not app.is_file() or not os.access(app, os.X_OK):
         raise ScenarioFailure(f"app executable not found or not executable: {app}")
@@ -54,22 +54,22 @@ def _validate(args: argparse.Namespace) -> tuple[Path, Path]:
         raise ScenarioFailure("simulator or DBC file is missing from the repository")
     if importlib.util.find_spec("can") is None or importlib.util.find_spec("cantools") is None:
         raise ScenarioFailure("missing python-can/cantools; use .venv/bin/python after installing requirements.txt")
-    if not args.interface or len(args.interface) >= 16 or "/" in args.interface:
-        raise ScenarioFailure(f"invalid interface name: {args.interface!r}")
+    if not interface or len(interface) >= 16 or "/" in interface:
+        raise ScenarioFailure(f"invalid interface name: {interface!r}")
     try:
-        socket.if_nametoindex(args.interface)
+        socket.if_nametoindex(interface)
     except OSError as error:
-        raise ScenarioFailure(f"CAN interface {args.interface!r} does not exist: {error}") from error
+        raise ScenarioFailure(f"CAN interface {interface!r} does not exist: {error}") from error
     try:
-        interface_type = int((Path("/sys/class/net") / args.interface / "type").read_text().strip())
-        flags = int((Path("/sys/class/net") / args.interface / "flags").read_text().strip(), 16)
+        interface_type = int((Path("/sys/class/net") / interface / "type").read_text().strip())
+        flags = int((Path("/sys/class/net") / interface / "flags").read_text().strip(), 16)
     except (OSError, ValueError) as error:
-        raise ScenarioFailure(f"unable to inspect interface {args.interface!r}: {error}") from error
+        raise ScenarioFailure(f"unable to inspect interface {interface!r}: {error}") from error
     if interface_type != 280:
-        raise ScenarioFailure(f"interface {args.interface!r} is not vcan (ARPHRD_CAN=280, got {interface_type})")
+        raise ScenarioFailure(f"interface {interface!r} is not vcan (ARPHRD_CAN=280, got {interface_type})")
     if not flags & 1:
-        raise ScenarioFailure(f"interface {args.interface!r} is down")
-    return app, args.log_dir if args.log_dir.is_absolute() else Path.cwd() / args.log_dir
+        raise ScenarioFailure(f"interface {interface!r} is down")
+    return app
 
 
 def _event(line: str) -> dict[str, str] | None:
@@ -105,11 +105,31 @@ def _terminate(process: subprocess.Popen[str] | None, name: str) -> tuple[bool, 
     return forced, f"{name} required SIGKILL" if forced else ""
 
 
-def run_scenario(scenario: str, expected_level: str | None = None) -> int:
+@dataclass
+class ScenarioResult:
+    name: str
+    status: str
+    reason: str | None
+    duration_s: float
+    artifacts: dict[str, str]
+    app_exit_code: int | None
+    simulator_exit_code: int | None
+    interrupted: bool = False
+    interrupt_exit_code: int | None = None
+
+
+def _normalized_exit(process: subprocess.Popen[str] | None) -> int | None:
+    if process is None or process.returncode is None:
+        return None
+    return process.returncode if process.returncode >= 0 else 128 + abs(process.returncode)
+
+
+def run_scenario(scenario: str, expected_level: str | None = None, *,
+                 app_path: Path = DEFAULT_APP, interface: str = "vcan0",
+                 log_root: Path = DEFAULT_LOG_DIR) -> ScenarioResult:
+    """Run one scenario and return its outcome only after all children are reaped."""
     if scenario not in SCENARIOS:
-        print(f"FAIL: unknown scenario {scenario}", file=sys.stderr)
-        return 2
-    args = parser(f"Run the {scenario} SocketCAN end-to-end scenario.").parse_args()
+        return ScenarioResult(scenario, "error", f"unknown scenario {scenario}", 0.0, {}, None, None)
     app_process: subprocess.Popen[str] | None = None
     simulator_process: subprocess.Popen[str] | None = None
     reader_threads: list[threading.Thread] = []
@@ -118,29 +138,33 @@ def run_scenario(scenario: str, expected_level: str | None = None) -> int:
     log_path = None
     failure: str | None = None
     cleanup_failure: str | None = None
+    unexpected_failure = False
+    report_failure: str | None = None
     forced_kill = False
     app_ready = False
     sim_started = False
     sim_stopped = False
     sim_exit: int | None = None
+    interrupted = False
+    interrupt_exit_code: int | None = None
     start_wall = time.monotonic()
     deadline = start_wall + TOTAL_TIMEOUT_S
 
     try:
-        log_root = args.log_dir if args.log_dir.is_absolute() else Path.cwd() / args.log_dir
+        log_root = log_root if log_root.is_absolute() else Path.cwd() / log_root
         log_root.mkdir(parents=True, exist_ok=True)
         log_path = log_root / f"{scenario}-{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%S.%fZ')}"
         log_path.mkdir()
         (log_path / "summary.txt").write_text(
-            f"scenario={scenario}\ninterface={args.interface}\nexpected={expected_level or scenario}\n"
+            f"scenario={scenario}\ninterface={interface}\nexpected={expected_level or scenario}\n"
         )
-        app, _ = _validate(args)
+        app = _validate(app_path, interface)
         commands = {
-            "app": [str(app), "--adas", args.interface],
-            "simulator": [sys.executable, str(SIMULATOR), "--scenario", scenario, "--interface", args.interface],
+            "app": [str(app), "--adas", interface],
+            "simulator": [sys.executable, str(SIMULATOR), "--scenario", scenario, "--interface", interface],
         }
         (log_path / "summary.txt").write_text(
-            f"scenario={scenario}\nexpected={expected_level or scenario}\ninterface={args.interface}\n"
+            f"scenario={scenario}\nexpected={expected_level or scenario}\ninterface={interface}\n"
             f"app_command={commands['app']!r}\nsimulator_command={commands['simulator']!r}\n"
         )
 
@@ -284,10 +308,13 @@ def run_scenario(scenario: str, expected_level: str | None = None) -> int:
         )
     except ScenarioFailure as error:
         failure = str(error)
-    except KeyboardInterrupt:
-        failure = "interrupted by user"
+    except KeyboardInterrupt as error:
+        failure = f"interrupted by signal: {error}" if error else "interrupted by user"
+        interrupted = True
+        interrupt_exit_code = 143 if "15" in str(error) or "SIGTERM" in str(error) else 130
     except Exception as error:
         failure = f"unexpected test error: {type(error).__name__}: {error}"
+        unexpected_failure = True
     finally:
         for process, name in ((simulator_process, "simulator"), (app_process, "app")):
             was_forced, message = _terminate(process, name)
@@ -304,16 +331,47 @@ def run_scenario(scenario: str, expected_level: str | None = None) -> int:
             cleanup_failure = f"{cleanup_failure}; log reader did not stop" if cleanup_failure else "log reader did not stop"
         if forced_kill:
             cleanup_failure = f"{cleanup_failure}; forced process kill is a test failure" if cleanup_failure else "forced process kill is a test failure"
-        if log_path and failure:
-            with (log_path / "summary.txt").open("a") as output:
-                output.write(f"failure={failure}\ncleanup_failure={cleanup_failure or 'none'}\n")
-
     if cleanup_failure:
         failure = f"{failure}; cleanup: {cleanup_failure}" if failure else f"cleanup failure: {cleanup_failure}"
+    if log_path:
+        try:
+            with (log_path / "summary.txt").open("a") as output:
+                output.write(f"status={'failed' if failure else 'passed'}\n")
+                output.write(f"failure={failure or 'none'}\ncleanup_failure={cleanup_failure or 'none'}\n")
+                output.write(f"app_exit_code={_normalized_exit(app_process)}\n")
+                output.write(f"simulator_exit_code={_normalized_exit(simulator_process)}\n")
+        except OSError as error:
+            report_failure = f"unable to finalize scenario summary: {error}"
+            failure = f"{failure}; {report_failure}" if failure else report_failure
     if failure:
         print(f"FAIL {scenario}: {failure}", file=sys.stderr)
         if log_path:
             print(f"Logs: {log_path}", file=sys.stderr)
-        return 1
+        return ScenarioResult(scenario, "error" if interrupted or cleanup_failure or unexpected_failure or report_failure else "failed", failure,
+                              time.monotonic() - start_wall,
+                              {"log_dir": str(log_path)} if log_path else {},
+                              _normalized_exit(app_process),
+                              _normalized_exit(simulator_process),
+                              interrupted, interrupt_exit_code)
     print(f"PASS {scenario}; logs: {log_path}")
-    return 0
+    return ScenarioResult(scenario, "passed", None, time.monotonic() - start_wall,
+                          {"log_dir": str(log_path)} if log_path else {},
+                          _normalized_exit(app_process),
+                          _normalized_exit(simulator_process))
+
+
+def main(scenario: str) -> int:
+    if scenario not in SCENARIOS:
+        print(f"FAIL: unknown scenario {scenario}", file=sys.stderr)
+        return 2
+    args = parser(f"Run the {scenario} SocketCAN end-to-end scenario.").parse_args()
+    def on_sigterm(signum, _frame):
+        raise KeyboardInterrupt(f"received signal {signum}")
+    previous_sigterm = signal.signal(signal.SIGTERM, on_sigterm)
+    try:
+        result = run_scenario(scenario, app_path=args.app, interface=args.interface, log_root=args.log_dir)
+    finally:
+        signal.signal(signal.SIGTERM, previous_sigterm)
+    if result.interrupted:
+        return result.interrupt_exit_code or 130
+    return 0 if result.status == "passed" else 1

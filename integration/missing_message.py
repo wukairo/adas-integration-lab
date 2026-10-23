@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-from common import run_scenario
+from common import main
 
 if __name__ == "__main__":
-    raise SystemExit(run_scenario("radar_timeout"))
+    raise SystemExit(main("radar_timeout"))
