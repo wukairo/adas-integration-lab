@@ -26,3 +26,11 @@
 - Chạy demo bisect, collector, package checksum/unpack/smoke.
 - Viết README, runbook và bảng evidence với hạn chế hạ tầng còn lại.
 - Commit theo nhóm thay đổi, thông điệp Conventional Commits mô tả chức năng.
+
+## Kết quả thực hiện
+
+- Hoàn thành các công cụ runtime config, release/provenance, metrics, fault injection và bisect.
+- Unit: 28 C++ + 36 Python; static analysis đạt; chín live scenarios đạt trên cả hai Jenkins runs.
+- Jenkins local đã provision và enabled systemd; full runs #1/#2 SUCCESS, failure fixture đỏ đúng Unit Test và không package.
+- Release local v1.0.0 đã tạo, checksum/unpack/smoke đạt.
+- Chi tiết evidence và các mục remote chưa kiểm chứng: [ACCEPTANCE.md](ACCEPTANCE.md).

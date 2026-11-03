@@ -1,0 +1,129 @@
+{
+  "release_tag": "v1.0.0",
+  "source_commit": "b20f66676c028ff8e3da3efda9dac698ea2b05e5",
+  "local_date": "2026-11-03",
+  "timezone": "Asia/Saigon",
+  "cpp_tests_passed": 28,
+  "python_tests_passed": 36,
+  "static_analysis": "passed",
+  "integration": [
+    {
+      "name": "normal",
+      "status": "passed",
+      "app_exit_code": 0,
+      "simulator_exit_code": 0
+    },
+    {
+      "name": "warning",
+      "status": "passed",
+      "app_exit_code": 0,
+      "simulator_exit_code": 0
+    },
+    {
+      "name": "critical",
+      "status": "passed",
+      "app_exit_code": 0,
+      "simulator_exit_code": 0
+    },
+    {
+      "name": "radar_timeout",
+      "status": "passed",
+      "app_exit_code": 0,
+      "simulator_exit_code": 0
+    },
+    {
+      "name": "invalid_signal",
+      "status": "passed",
+      "app_exit_code": 0,
+      "simulator_exit_code": 0
+    },
+    {
+      "name": "invalid_can_id",
+      "status": "passed",
+      "app_exit_code": 0,
+      "simulator_exit_code": 0
+    },
+    {
+      "name": "wrong_dlc",
+      "status": "passed",
+      "app_exit_code": 0,
+      "simulator_exit_code": 0
+    },
+    {
+      "name": "high_frequency",
+      "status": "passed",
+      "app_exit_code": 0,
+      "simulator_exit_code": 0
+    },
+    {
+      "name": "invalid_configuration",
+      "status": "passed",
+      "app_exit_code": 0,
+      "simulator_exit_code": 2
+    }
+  ],
+  "jenkins_builds": [
+    {
+      "number": 1,
+      "url": "http://127.0.0.1:8080/job/adas-validation/1/",
+      "result": "SUCCESS",
+      "duration": 60673,
+      "artifacts_count": 85
+    },
+    {
+      "number": 2,
+      "url": "http://127.0.0.1:8080/job/adas-validation/2/",
+      "result": "SUCCESS",
+      "duration": 59210,
+      "artifacts_count": 85
+    },
+    {
+      "number": 1,
+      "url": "http://127.0.0.1:8080/job/adas-failure-validation/1/",
+      "result": "FAILURE",
+      "duration": 58744,
+      "artifacts_count": 18
+    }
+  ],
+  "controlled_regression": {
+    "stage": "Unit Test",
+    "failed_test": "CollisionWarning.TtcThresholdsAndClosingDirection",
+    "package_skipped": true,
+    "failure_logs_archived": true
+  },
+  "release": {
+    "path": "build-final/package/adas-app-v1.0.0.tar.gz",
+    "sha256": "474dafee5c0ec9215e93857c2c65d055fef7b0cfc2fe0d084edb3a4af302ab03",
+    "unpack_and_smoke": "passed"
+  },
+  "bisect": {
+    "status": "passed",
+    "good_exit": 0,
+    "bad_exit": 1,
+    "first_bad_commit": "7260a50e09fd34ad438176dd68250c678056c521",
+    "reset_succeeded": true
+  },
+  "interruption": {
+    "runner_exit": 143,
+    "expected_exit": 143,
+    "children_at_interrupt": [
+      9335,
+      9338,
+      9341
+    ],
+    "children_still_alive": [],
+    "summary_created": true
+  },
+  "configuration_live_test": "passed",
+  "services": {
+    "adas-vcan": "enabled, active",
+    "adas-jenkins": "enabled, active, user ice, loopback port 8080"
+  },
+  "not_verified": [
+    "GitHub Actions remote PR checks",
+    "remote branch protection/review rules",
+    "merge/main trigger from GitHub",
+    "post-reboot execution",
+    "Jenkins UI abort path"
+  ]
+}
