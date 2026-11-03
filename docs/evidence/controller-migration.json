@@ -1,0 +1,66 @@
+{
+  "controller_ip": "192.168.222.132",
+  "controller_user": "jenkins",
+  "controller_executors": 0,
+  "agent_ip": "192.168.222.129",
+  "agent_name": "linux-socketcan-129",
+  "agent_user": "jenkins-agent",
+  "agent_executors": 1,
+  "transport": "WebSocket through Nginx port 80",
+  "jenkins_url": "http://jenkins.ice.tech/",
+  "jenkins_version": "2.580.2",
+  "build": 9,
+  "build_url": "http://jenkins.ice.tech/job/adas-validation/9/",
+  "result": "SUCCESS",
+  "source_commit": "9e8a8212cb07a5f897b1e50a62b07b0197657b85",
+  "artifact_count": 85,
+  "cpp_tests_passed": 28,
+  "python_tests_passed": 36,
+  "integration_results": [
+    {
+      "name": "normal",
+      "status": "passed"
+    },
+    {
+      "name": "warning",
+      "status": "passed"
+    },
+    {
+      "name": "critical",
+      "status": "passed"
+    },
+    {
+      "name": "radar_timeout",
+      "status": "passed"
+    },
+    {
+      "name": "invalid_signal",
+      "status": "passed"
+    },
+    {
+      "name": "invalid_can_id",
+      "status": "passed"
+    },
+    {
+      "name": "wrong_dlc",
+      "status": "passed"
+    },
+    {
+      "name": "high_frequency",
+      "status": "passed"
+    },
+    {
+      "name": "invalid_configuration",
+      "status": "passed"
+    }
+  ],
+  "previous_builds_preserved": 8,
+  "historical_release_bytes_verified": true,
+  "source_scm": "ssh://ice@192.168.222.129/home/ice/projects/adas-integration-lab",
+  "source_credential": "adas-source-readonly",
+  "old_controller_retired": true,
+  "services_enabled": true,
+  "reboot_tested": false,
+  "old_controller_runtime_deleted": true,
+  "controller_restart_and_agent_reconnect": "passed"
+}

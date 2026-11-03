@@ -39,3 +39,19 @@ Source release: `b20f66676c028ff8e3da3efda9dac698ea2b05e5`, tag local `v1.0.0`. 
 Chưa có bằng chứng chạy GitHub Actions trên PR, required check/review rules, merge main hoặc GitHub webhook. Job Jenkins local kiểm chứng pipeline từ SCM nhánh feature hiện tại; không thay thế bằng chứng trigger remote. Đã kiểm chứng SIGTERM của runner local; chưa thử nút Abort trong UI Jenkins. Chưa tự reboot server để thử service sau reboot; service đã cài/enabled và vcan đang hoạt động.
 
 Tùy chọn coverage, Azure, Conan, Prometheus/Grafana chưa triển khai. Đây là virtual CAN, không ECU thật/HIL hoặc chứng nhận safety.
+
+## Migration controller sang server riêng
+
+Đã chuyển Jenkins controller và Nginx sang `192.168.222.132`; built-in node có
+0 executor. `192.168.222.129` giữ source và agent `linux-socketcan-129`, user
+`jenkins-agent`, 1 executor, kết nối WebSocket qua port 80.
+
+[Build #9](http://jenkins.ice.tech/job/adas-validation/9/) SUCCESS trên kiến trúc
+mới: 28 C++ tests, 36 Python tests, cppcheck và 9/9 live scenarios đạt; 85 artifacts
+đã được lưu về controller. Tám build lịch sử được giữ nguyên; release v1.0.0
+trong lịch sử được kiểm tra byte-for-byte sau khi restore.
+
+Service và runtime Jenkins cũ trên `.129` đã gỡ; vcan/agent tiếp tục hoạt động.
+Snapshot rollback root-only được giữ trên controller mới. Xem
+[evidence migration](evidence/controller-migration.json) và
+[runbook phân tán](JENKINS_DISTRIBUTED.md). Chưa thực hiện reboot cả hai VM.

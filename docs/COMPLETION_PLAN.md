@@ -34,3 +34,11 @@
 - Jenkins local đã provision và enabled systemd; full runs #1/#2 SUCCESS, failure fixture đỏ đúng Unit Test và không package.
 - Release local v1.0.0 đã tạo, checksum/unpack/smoke đạt.
 - Chi tiết evidence và các mục remote chưa kiểm chứng: [ACCEPTANCE.md](ACCEPTANCE.md).
+
+## Cập nhật hạ tầng theo yêu cầu người dùng
+
+- Jenkins controller + Nginx chuyển sang `.132`, built-in executor=0.
+- Source và CAN agent riêng chạy ở `.129`, executor=1, user riêng không sudo.
+- Full distributed build #9 SUCCESS, history/artifacts được giữ đủ.
+- Controller/runtime Jenkins cũ trên `.129` đã gỡ sau khi nghiệm thu.
+- Máy dùng trình duyệt cần cập nhật hosts sang `192.168.222.132 jenkins.ice.tech`.

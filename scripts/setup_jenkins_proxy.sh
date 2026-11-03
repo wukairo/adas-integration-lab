@@ -6,6 +6,13 @@ if [[ "$EUID" -ne 0 ]]; then
     exec sudo bash "$ROOT/scripts/setup_jenkins_proxy.sh" "$@"
 fi
 
+# Run this only on the controller, never on the separate SocketCAN agent.
+curl --noproxy '*' --fail --silent --show-error --connect-timeout 5 --max-time 10 \
+    http://127.0.0.1:8080/login >/dev/null || {
+    echo 'Start the local Jenkins controller before provisioning its proxy.' >&2
+    exit 1
+}
+
 SITE=/etc/nginx/sites-available/jenkins.ice.tech
 ENABLED=/etc/nginx/sites-enabled/jenkins.ice.tech
 if [[ -e "$ENABLED" || -L "$ENABLED" ]]; then

@@ -4,10 +4,10 @@ Cấu hình chuẩn bị cho `http://jenkins.ice.tech` trên port 80, proxy tớ
 đang chạy ở `127.0.0.1:8080`. Headers và WebSocket theo
 [hướng dẫn Jenkins Nginx](https://www.jenkins.io/doc/book/system-administration/reverse-proxy-configuration-nginx/).
 
-Chạy trên server:
+Nếu cần dựng lại proxy, copy source/config sang controller `.132` rồi chạy
+script từ checkout đó (không chạy trên build agent `.129`):
 
 ```bash
-cd /home/ice/projects/adas-integration-lab
 bash scripts/setup_jenkins_proxy.sh
 ```
 

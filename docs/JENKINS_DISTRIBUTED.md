@@ -90,6 +90,8 @@ journalctl -u adas-jenkins.service -n 50 --no-pager
 ```
 
 Các services đã enabled để khởi động sau reboot; chưa tự reboot máy trong
-phiên migration. Theo [hướng dẫn Jenkins](https://www.jenkins.io/doc/book/security/controller-isolation/),
+phiên migration. Đã restart controller sau khi xóa bootstrap/staging và kiểm
+chứng agent tự reconnect qua WebSocket, built-in vẫn giữ 0 executor.
+Theo [hướng dẫn Jenkins](https://www.jenkins.io/doc/book/security/controller-isolation/),
 build được chuyển khỏi built-in node. Giao thức agent theo
 [Jenkins Remoting](https://github.com/jenkinsci/remoting/blob/master/docs/inbound-agent.md).
