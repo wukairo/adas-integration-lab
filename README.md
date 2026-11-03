@@ -5,8 +5,9 @@
 ```mermaid
 flowchart LR
   PR[Pull request] --> GA[GitHub Actions: build + unit]
-  Merge[Merge main / release tag] --> J[Jenkins Linux]
-  J --> Build[CMake Release]
+  Merge[Merge main / release tag] --> J[Jenkins controller .132]
+  J --> Agent[Linux agent .129]
+  Agent --> Build[CMake Release]
   Build --> Gates[Cppcheck + C++/Python unit]
   Gates --> Sim[Python CAN simulator]
   Sim --> CAN[vcan / SocketCAN]
@@ -117,9 +118,9 @@ Demo bisect dựng lịch sử Git tạm gồm good, thay đổi vô hại và s
 
 ## CI/CT
 
-GitHub Actions chạy `quick-ci` trên PR vào main: Release build, C++/Python unit tests và upload logs kể cả khi fail. Jenkins chạy full pipeline trên Linux label `linux-socketcan`, một executor với vcan0 dành riêng: checkout → environment → configure → build → static analysis → unit → live integration → system JSON → package. Chỉ package sau khi mọi quality gate đạt; post luôn archive diagnostics đã có.
+GitHub Actions chạy `quick-ci` trên PR vào main: Release build, C++/Python unit tests và upload logs kể cả khi fail. Jenkins controller chạy ở `192.168.222.132` với 0 executor; agent `192.168.222.129` chạy full pipeline trên Linux label `linux-socketcan`, một executor với vcan0 dành riêng: checkout → environment → configure → build → static analysis → unit → live integration → system JSON → package. Chỉ package sau khi mọi quality gate đạt; post luôn archive diagnostics đã có.
 
-Jenkins dùng SCM polling mỗi khoảng 5 phút; cấu hình job theo main hoặc tag cần build. Không chạy code PR chưa tin cậy trên agent có CAN. [Runbook CI](docs/CI_RUNBOOK.md) mô tả provisioning, trigger, artifacts, khôi phục vcan và failure demo. [Bảng nghiệm thu](docs/ACCEPTANCE.md) ghi bằng chứng thực tế và phần hạ tầng chưa kiểm chứng.
+Jenkins dùng SCM polling mỗi khoảng 5 phút; cấu hình job theo main hoặc tag cần build. Không chạy code PR chưa tin cậy trên agent có CAN. [Runbook controller/agent](docs/JENKINS_DISTRIBUTED.md) và [runbook CI](docs/CI_RUNBOOK.md) mô tả provisioning, trigger, artifacts, khôi phục vcan và failure demo. [Bảng nghiệm thu](docs/ACCEPTANCE.md) ghi bằng chứng thực tế và phần hạ tầng chưa kiểm chứng.
 
 ## Troubleshooting
 

@@ -1,0 +1,18 @@
+[Unit]
+Description=ADAS Jenkins controller
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=jenkins
+Group=jenkins
+Environment=JENKINS_HOME=/var/lib/jenkins
+WorkingDirectory=/var/lib/jenkins
+ExecStart=/usr/bin/java -Xms128m -Xmx512m -Djava.awt.headless=true -Djenkins.install.runSetupWizard=false -jar /opt/adas-jenkins/jenkins.war --httpListenAddress=127.0.0.1 --httpPort=8080
+Restart=on-failure
+RestartSec=10
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target

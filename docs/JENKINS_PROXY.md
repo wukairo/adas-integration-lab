@@ -17,14 +17,14 @@ service khác đang dùng port 80. Nếu port 80 đã bị chiếm thì cần x�
 trước khi Nginx có thể start. Smoke test bỏ qua proxy môi trường để kiểm tra
 trực tiếp Nginx local và chờ worker reload hoàn tất.
 
-Đã triển khai trên server `192.168.222.129`: Nginx active/enabled, virtual host
+Đã chuyển sang controller `192.168.222.132`: Nginx active/enabled, virtual host
 được bật, Jenkins URL là `http://jenkins.ice.tech/`. Trang login trả HTTP 200
 qua IP LAN cổng 80. Firewall UFW hiện không bật.
 
 Trên máy dùng trình duyệt, thêm dòng sau vào hosts hoặc tạo DNS record tương ứng:
 
 ```text
-192.168.222.129 jenkins.ice.tech
+192.168.222.132 jenkins.ice.tech
 ```
 
 - Windows: mở Notepad với quyền Administrator, sửa
@@ -35,3 +35,8 @@ Chỉ thêm hosts trên server không khiến máy cá nhân phân giải đư�
 Sau khi tên được phân giải, mở `http://jenkins.ice.tech`, đăng nhập bằng tài khoản
 Jenkins hiện có. Trong Manage Jenkins → System → Jenkins Location, đặt Jenkins URL
 thành `http://jenkins.ice.tech/` rồi Save. Giữ Jenkins ở loopback port 8080.
+
+Nếu trước đây đã thêm địa chỉ `.129` vào hosts trên máy cá nhân, thay dòng đó
+bằng `.132`; không giữ hai dòng cùng hostname. Trên Windows chạy
+`ipconfig /flushdns` sau khi lưu. Server `.129` hiện là build agent, không còn
+chạy Jenkins controller. Xem [kiến trúc phân tán](JENKINS_DISTRIBUTED.md).

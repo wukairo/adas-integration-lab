@@ -52,16 +52,25 @@ bash scripts/setup_vcan.sh
 
 Để release có tên version: tạo annotated tag sau khi đã commit và kiểm chứng source, configure/build lại rồi package. `git push origin <branch>` và `git push origin v1.0.0` là bước công bố remote theo quyền của repository; không ghi credentials vào repo.
 
-## Jenkins local trên server đồ án
+## Jenkins phân tán đang vận hành
 
-Truy cập qua Nginx port 80: **http://jenkins.ice.tech**. Trên máy dùng trình
-duyệt, thêm `192.168.222.129 jenkins.ice.tech` vào hosts nếu chưa có DNS phù hợp.
-Xem [cấu hình và hướng dẫn reverse proxy](JENKINS_PROXY.md).
+Controller và Nginx chạy trên `192.168.222.132`; build/test CAN chạy trên agent
+`192.168.222.129`, user `jenkins-agent`, label `linux-socketcan`, một executor.
+Controller có `0` executor. Agent kết nối WebSocket qua cổng 80.
 
-Controller kiểm chứng được đặt dưới `build-jenkins/` (ignored), bind `127.0.0.1:8080`, chạy bằng user ice. Tài khoản `admin`, mật khẩu riêng ở `build-jenkins/home/admin-password` (quyền 0600); không dùng mật khẩu sudo làm mật khẩu Jenkins. Kết nối qua SSH tunnel `ssh -L 8080:127.0.0.1:8080 <user>@<server>` rồi mở localhost:8080.
+Truy cập **http://jenkins.ice.tech**, hosts trên máy dùng trình duyệt phải trỏ
+`192.168.222.132 jenkins.ice.tech`. Username/password, credentials, history và
+artifacts Jenkins được giữ nguyên sau migration.
 
-Job `adas-validation` hiện dùng local SCM nhánh `main` sau khi merge phần triển khai. Các runs #1/#2 trong evidence lịch sử chạy trên nhánh feature trước khi merge. Job local chưa chứng minh trigger từ GitHub hoặc repository rules. Cấu hình cho phép local Git checkout chỉ dành cho controller lab này. Chi tiết runs thực xem ACCEPTANCE.md.
+Xem [runbook controller/agent](JENKINS_DISTRIBUTED.md) cho paths, services,
+SCM credential chỉ đọc, rollback snapshot và troubleshooting; xem
+[cấu hình Nginx](JENKINS_PROXY.md) cho virtual host. Jenkins runtime không còn
+phụ thuộc thư mục source/build-jenkins trên server `.129`.
 
-Khởi động lại controller đã provision: `bash scripts/start_jenkins_lab.sh`. Template systemd `scripts/systemd/adas-jenkins.service.in` dùng placeholders `@USER@` và `@PROJECT@`; thay bằng user thường và đường dẫn clone rồi cài vào `/etc/systemd/system/adas-jenkins.service`. Dừng controller cũ trước khi bật service để tránh tranh port 8080. Không commit thư mục build-jenkins vì chứa tài khoản, logs và state.
+Job `adas-validation` dùng SCM qua SSH tới source repo trên `.129`, branch
+`*/main`. Job failure demo cũ được giữ history nhưng disabled. Các runs #1/#2
+trong evidence gốc được thực hiện trước migration; bằng chứng migration ghi
+riêng, không thay thế kết quả lịch sử.
 
-Runtime Jenkins đã dùng để kiểm chứng: 2.580.2 LTS, SHA-256 WAR `d98032d2401c540a35613a82ed358921fcf3166d5e6eaaaf60a7941845be3251`, lấy từ [Jenkins download](https://www.jenkins.io/download/). Java 21; cài thêm `fontconfig libharfbuzz0b` nếu Java headless thiếu font manager. Plugins đã được tải bằng [plugin installation manager](https://github.com/jenkinsci/plugin-installation-manager-tool), gồm workflow-aggregator, pipeline-model-definition, git và timestamper cùng dependencies. Log bootstrap nằm trong build-jenkins/plugin-install.log.
+Runtime đang dùng Jenkins 2.580.2 LTS, Java 21. WAR SHA-256:
+`d98032d2401c540a35613a82ed358921fcf3166d5e6eaaaf60a7941845be3251`.

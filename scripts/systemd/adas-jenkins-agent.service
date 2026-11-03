@@ -1,0 +1,19 @@
+[Unit]
+Description=ADAS SocketCAN Jenkins agent
+After=network-online.target adas-vcan.service
+Wants=network-online.target
+Requires=adas-vcan.service
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+User=jenkins-agent
+Group=jenkins-agent
+WorkingDirectory=/var/lib/adas-jenkins-agent
+ExecStart=/usr/bin/java -Xmx384m -jar /var/lib/adas-jenkins-agent/agent.jar -url http://jenkins.ice.tech/ -secret @/var/lib/adas-jenkins-agent/secret -name linux-socketcan-129 -webSocket -workDir /var/lib/adas-jenkins-agent
+Restart=always
+RestartSec=10
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target
