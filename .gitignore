@@ -5,4 +5,6 @@ __pycache__/
 /.idea/
 /.vscode/
 *.log
-/docs/
+
+/.ruff_cache/
+/system_info.json
