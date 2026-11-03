@@ -19,6 +19,7 @@ sys.path.insert(0, str(ROOT / "integration"))
 
 import build  # noqa: E402
 import common as integration_common  # noqa: E402
+import run_tests  # noqa: E402
 import static_analysis  # noqa: E402
 
 
@@ -133,6 +134,70 @@ class ReportAndScenarioTests(unittest.TestCase):
             self.assertTrue((log_dir / "summary.txt").is_file())
             self.assertIsNone(result.app_exit_code)
             self.assertIsNone(result.simulator_exit_code)
+
+
+class VirtualCanPreflightTests(unittest.TestCase):
+    def inspect_link(self, *, kind="vcan", flags=None, returncode=0, stderr=""):
+        link = {
+            "ifname": "testcan0",
+            "flags": flags if flags is not None else ["NOARP", "UP"],
+            "link_type": "can",
+            "linkinfo": {"info_kind": kind},
+        }
+        return mock.patch.object(
+            integration_common.shutil,
+            "which",
+            return_value="/usr/sbin/ip",
+        ), mock.patch.object(
+            integration_common.subprocess,
+            "run",
+            return_value=subprocess.CompletedProcess(
+                ["ip"], returncode, json.dumps([link]), stderr
+            ),
+        )
+
+    def test_up_vcan_is_accepted(self):
+        which, command = self.inspect_link()
+        with which, command:
+            self.assertIsNone(integration_common.virtual_can_problem("testcan0"))
+
+    def test_physical_can_is_rejected_even_when_arphrd_is_can_and_up(self):
+        which, command = self.inspect_link(kind="can")
+        with which, command:
+            problem = integration_common.virtual_can_problem("testcan0")
+        self.assertIn("not virtual CAN", problem or "")
+        self.assertIn("kind='can'", problem or "")
+
+    def test_down_vcan_is_rejected(self):
+        which, command = self.inspect_link(flags=["NOARP"])
+        with which, command:
+            problem = integration_common.virtual_can_problem("testcan0")
+        self.assertIn("is down", problem or "")
+
+    def test_missing_iproute2_fails_closed(self):
+        with mock.patch.object(integration_common.shutil, "which", return_value=None):
+            problem = integration_common.virtual_can_problem("testcan0")
+        self.assertIn("iproute2 'ip' command is unavailable", problem or "")
+
+    def test_runner_preflight_uses_shared_virtual_can_check(self):
+        with tempfile.TemporaryDirectory() as temp:
+            app = Path(temp) / "adas_app"
+            app.write_text("#!/bin/sh\nexit 0\n")
+            app.chmod(0o755)
+            with (
+                mock.patch.object(
+                    run_tests.importlib.util, "find_spec", return_value=object()
+                ),
+                mock.patch.object(
+                    integration_common,
+                    "virtual_can_problem",
+                    return_value="physical CAN is not permitted",
+                ),
+            ):
+                self.assertEqual(
+                    run_tests.integration_preflight(app, "can0"),
+                    "physical CAN is not permitted",
+                )
 
 
 class InterruptionTests(unittest.TestCase):

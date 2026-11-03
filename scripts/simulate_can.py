@@ -31,7 +31,17 @@ else:
 
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_DBC = ROOT / "dbc" / "vehicle.dbc"
-SCENARIOS = ("normal", "warning", "critical", "radar_timeout", "invalid_signal")
+SCENARIOS = (
+    "normal",
+    "warning",
+    "critical",
+    "radar_timeout",
+    "invalid_signal",
+    "invalid_can_id",
+    "wrong_dlc",
+    "high_frequency",
+    "invalid_configuration",
+)
 
 
 class SimulatorError(Exception):
@@ -77,6 +87,18 @@ SCENARIO_DATA = {
         {"ObjectDistance": 100, "RelativeVelocity": 0, "ObjectValid": 1},
         invalid_vehicle=True,
     ),
+    "invalid_can_id": Scenario(
+        {"VehicleSpeed": 50, "SteeringAngle": 0, "BrakeStatus": 0},
+        {"ObjectDistance": 100, "RelativeVelocity": 0, "ObjectValid": 1},
+    ),
+    "wrong_dlc": Scenario(
+        {"VehicleSpeed": 50, "SteeringAngle": 0, "BrakeStatus": 0},
+        {"ObjectDistance": 100, "RelativeVelocity": 0, "ObjectValid": 1},
+    ),
+    "high_frequency": Scenario(
+        {"VehicleSpeed": 80, "SteeringAngle": 0, "BrakeStatus": 0},
+        {"ObjectDistance": 20, "RelativeVelocity": 7, "ObjectValid": 1},
+    ),
 }
 
 EXPECTED_MESSAGES = {
@@ -117,6 +139,8 @@ def build_parser() -> argparse.ArgumentParser:
 
 def parse_config(argv: Iterable[str] | None = None) -> Config:
     args = build_parser().parse_args(argv)
+    if args.scenario == "invalid_configuration":
+        args.period_ms = 0
     period_s = args.period_ms / 1000.0
     for name, value in (("period-ms", args.period_ms), ("duration-s", args.duration_s)):
         if not math.isfinite(value) or value <= 0:
@@ -139,11 +163,17 @@ def parse_config(argv: Iterable[str] | None = None) -> Config:
             raise ValueError("radar_timeout requires at least 1 second of silence")
     elif args.warmup_s is not None:
         raise ValueError("--warmup-s is only valid for radar_timeout")
+    if args.scenario == "high_frequency" and args.period_ms == 100:
+        period_ms = 1.0
+    else:
+        period_ms = args.period_ms
+    if args.scenario == "high_frequency" and period_ms > 10:
+        raise ValueError("high_frequency requires --period-ms no greater than 10")
     return Config(
         args.scenario,
         args.interface,
         args.dbc,
-        args.period_ms,
+        period_ms,
         args.duration_s,
         warmup_s if args.scenario == "radar_timeout" else None,
     )
@@ -228,7 +258,7 @@ def load_and_validate_dbc(path: Path):
 
 
 def encode_scenario(database, scenario_name: str) -> tuple[bytes, bytes]:
-    """Encode a scenario using the DBC; only invalid_signal relaxes range checks."""
+    """Encode valid DBC payloads; fault scenarios alter frames at transmit time."""
     scenario = SCENARIO_DATA[scenario_name]
     vehicle = database.get_message_by_name("VehicleState").encode(
         scenario.vehicle, strict=not scenario.invalid_vehicle
@@ -267,7 +297,12 @@ def run_schedule(
     next_tick = 0
     phase_logged = False
     scenario = config.scenario
-    fault = " fault=VehicleSpeedOutOfRange" if scenario == "invalid_signal" else ""
+    fault = {
+        "invalid_signal": " fault=VehicleSpeedOutOfRange",
+        "invalid_can_id": " fault=UnknownCanId(0x321)",
+        "wrong_dlc": " fault=RadarObjectDlc(7)",
+        "high_frequency": " fault=HighFrequency",
+    }.get(scenario, "")
     warmup_log = f" warmup_s={warmup:g}" if warmup is not None else ""
     _log(
         f"SIM_START scenario={scenario} interface={config.interface} "
@@ -299,7 +334,9 @@ def run_schedule(
                 f"id=0x100 dlc=8 data={vehicle_payload.hex().upper()}"
             )
             elapsed = clock() - start
-            if scenario != "radar_timeout" or (warmup is not None and elapsed < warmup):
+            if scenario not in {"radar_timeout", "wrong_dlc"} or (
+                scenario == "radar_timeout" and warmup is not None and elapsed < warmup
+            ):
                 remaining = duration - elapsed
                 if remaining > 0:
                     bus.send(
@@ -310,7 +347,25 @@ def run_schedule(
                         f"SIM_TX t_ms={_elapsed_ms(start, clock)} scenario={scenario} "
                         f"id=0x200 dlc=8 data={radar_payload.hex().upper()}"
                     )
-            elif not phase_logged:
+            if scenario == "invalid_can_id" and duration - (clock() - start) > 0:
+                bus.send(_message(0x321, vehicle_payload), timeout=timeout)
+                _log(
+                    f"SIM_TX t_ms={_elapsed_ms(start, clock)} scenario={scenario} "
+                    f"id=0x321 dlc=8 data={vehicle_payload.hex().upper()} fault=UNKNOWN_ID"
+                )
+            elif scenario == "wrong_dlc" and duration - (clock() - start) > 0:
+                malformed = radar_payload[:-1]
+                bus.send(_message(0x200, malformed), timeout=timeout)
+                _log(
+                    f"SIM_TX t_ms={_elapsed_ms(start, clock)} scenario={scenario} "
+                    f"id=0x200 dlc=7 data={malformed.hex().upper()} fault=WRONG_DLC"
+                )
+            elif (
+                scenario == "radar_timeout"
+                and warmup is not None
+                and elapsed >= warmup
+                and not phase_logged
+            ):
                 _log(f"SIM_PHASE t_ms={_elapsed_ms(start, clock)} phase=radar_silence")
                 phase_logged = True
         except Exception as error:
@@ -338,9 +393,16 @@ def _message(arbitration_id: int, payload: bytes):
 
 
 def run(config: Config, dbc_path: Path) -> int:
+    if config.scenario == "invalid_configuration":
+        raise SimulatorError(
+            "injected invalid configuration: --period-ms must be greater than zero"
+        )
     database = load_and_validate_dbc(dbc_path)
     try:
-        vehicle_payload, radar_payload = encode_scenario(database, config.scenario)
+        payload_scenario = (
+            "warning" if config.scenario == "high_frequency" else config.scenario
+        )
+        vehicle_payload, radar_payload = encode_scenario(database, payload_scenario)
     except Exception as error:
         raise SimulatorError(
             f"unable to encode scenario {config.scenario}: {error}"

@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import argparse
 import importlib.util
+import json
 import os
 import signal
+import shutil
 import socket
 import subprocess
 import sys
@@ -20,7 +22,17 @@ DEFAULT_APP = ROOT / "build-phase6" / "adas_app"
 DEFAULT_LOG_DIR = ROOT / "build-phase6" / "integration-logs"
 SIMULATOR = ROOT / "scripts" / "simulate_can.py"
 DBC = ROOT / "dbc" / "vehicle.dbc"
-SCENARIOS = {"normal", "warning", "critical", "radar_timeout", "invalid_signal"}
+SCENARIOS = {
+    "normal",
+    "warning",
+    "critical",
+    "radar_timeout",
+    "invalid_signal",
+    "invalid_can_id",
+    "wrong_dlc",
+    "high_frequency",
+    "invalid_configuration",
+}
 TOTAL_TIMEOUT_S = 10.0
 TEARDOWN_TIMEOUT_S = 4.0
 
@@ -45,6 +57,46 @@ def parser(description: str) -> argparse.ArgumentParser:
     return result
 
 
+def virtual_can_problem(interface: str) -> str | None:
+    """Return a diagnostic unless iproute2 proves this is an UP vcan link."""
+    ip = shutil.which("ip")
+    if ip is None:
+        return (
+            "iproute2 'ip' command is unavailable; cannot verify virtual CAN interface"
+        )
+    try:
+        result = subprocess.run(
+            [ip, "-j", "-details", "link", "show", "dev", interface],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=5,
+        )
+    except (OSError, subprocess.TimeoutExpired) as error:
+        return f"unable to inspect CAN interface {interface!r} with iproute2: {error}"
+    if result.returncode != 0:
+        detail = result.stderr.strip() or f"ip exited with status {result.returncode}"
+        return f"unable to inspect CAN interface {interface!r}: {detail}"
+    try:
+        links = json.loads(result.stdout)
+    except json.JSONDecodeError as error:
+        return f"invalid JSON from iproute2 for interface {interface!r}: {error}"
+    if not isinstance(links, list) or len(links) != 1 or not isinstance(links[0], dict):
+        return f"iproute2 returned no unique link for interface {interface!r}"
+    link = links[0]
+    kind = (
+        link.get("linkinfo", {}).get("info_kind")
+        if isinstance(link.get("linkinfo"), dict)
+        else None
+    )
+    if kind != "vcan":
+        return f"interface {interface!r} is not virtual CAN (ip link kind={kind!r})"
+    flags = link.get("flags")
+    if not isinstance(flags, list) or "UP" not in flags:
+        return f"vcan interface {interface!r} is down"
+    return None
+
+
 def _validate(app_arg: Path, interface: str) -> Path:
     app = app_arg if app_arg.is_absolute() else Path.cwd() / app_arg
     app = app.resolve()
@@ -67,23 +119,9 @@ def _validate(app_arg: Path, interface: str) -> Path:
         raise ScenarioFailure(
             f"CAN interface {interface!r} does not exist: {error}"
         ) from error
-    try:
-        interface_type = int(
-            (Path("/sys/class/net") / interface / "type").read_text().strip()
-        )
-        flags = int(
-            (Path("/sys/class/net") / interface / "flags").read_text().strip(), 16
-        )
-    except (OSError, ValueError) as error:
-        raise ScenarioFailure(
-            f"unable to inspect interface {interface!r}: {error}"
-        ) from error
-    if interface_type != 280:
-        raise ScenarioFailure(
-            f"interface {interface!r} is not vcan (ARPHRD_CAN=280, got {interface_type})"
-        )
-    if not flags & 1:
-        raise ScenarioFailure(f"interface {interface!r} is down")
+    interface_problem = virtual_can_problem(interface)
+    if interface_problem:
+        raise ScenarioFailure(interface_problem)
     return app
 
 
@@ -156,6 +194,7 @@ def run_scenario(
         )
     app_process: subprocess.Popen[str] | None = None
     simulator_process: subprocess.Popen[str] | None = None
+    trace_process: subprocess.Popen[str] | None = None
     reader_threads: list[threading.Thread] = []
     records: list[CapturedLine] = []
     records_lock = threading.Lock()
@@ -166,6 +205,7 @@ def run_scenario(
     report_failure: str | None = None
     forced_kill = False
     app_ready = False
+    trace_status = "unavailable: candump executable not found"
     sim_started = False
     sim_stopped = False
     sim_exit: int | None = None
@@ -197,6 +237,8 @@ def run_scenario(
                 interface,
             ],
         }
+        if scenario == "high_frequency":
+            commands["simulator"].extend(["--period-ms", "1"])
         (log_path / "summary.txt").write_text(
             f"scenario={scenario}\nexpected={expected_level or scenario}\ninterface={interface}\n"
             f"app_command={commands['app']!r}\nsimulator_command={commands['simulator']!r}\n"
@@ -222,6 +264,29 @@ def run_scenario(
             )
             thread.start()
             reader_threads.append(thread)
+
+        (log_path / "candump.stdout.log").touch()
+        trace_error_path = log_path / "candump.stderr.log"
+        trace_error_path.touch()
+        candump = shutil.which("candump")
+        if candump is not None:
+            try:
+                trace_process = subprocess.Popen(
+                    [candump, "-L", interface],
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    text=True,
+                    bufsize=1,
+                    start_new_session=True,
+                )
+                trace_out = (log_path / "candump.stdout.log").open("w", buffering=1)
+                trace_err = trace_error_path.open("w", buffering=1)
+                start_reader("candump", "stdout", trace_process.stdout, trace_out)
+                start_reader("candump", "stderr", trace_process.stderr, trace_err)
+                trace_status = f"capturing with {candump}"
+            except OSError as error:
+                trace_status = f"unavailable: could not start candump: {error}"
+                trace_error_path.write_text(trace_status + "\n")
 
         app_process = subprocess.Popen(
             commands["app"],
@@ -283,6 +348,12 @@ def run_scenario(
                 )
             if simulator_process.poll() is not None:
                 sim_exit = simulator_process.returncode
+                if scenario == "invalid_configuration":
+                    if sim_exit != 2:
+                        raise ScenarioFailure(
+                            f"invalid configuration must fail validation with exit 2, got {sim_exit}"
+                        )
+                    break
                 if sim_exit != 0:
                     raise ScenarioFailure(f"simulator exited with {sim_exit}")
                 stop_deadline = min(deadline, time.monotonic() + 1.0)
@@ -304,8 +375,10 @@ def run_scenario(
             time.sleep(0.01)
         else:
             raise ScenarioFailure(f"scenario exceeded {TOTAL_TIMEOUT_S:.0f}s deadline")
-        if not sim_started:
+        if scenario != "invalid_configuration" and not sim_started:
             raise ScenarioFailure("simulator did not emit SIM_START")
+        if scenario == "invalid_configuration":
+            time.sleep(0.55)
         if time.monotonic() - sim_start_wall > TOTAL_TIMEOUT_S:
             raise ScenarioFailure("simulator completed after the scenario deadline")
         time.sleep(0.05)
@@ -334,14 +407,45 @@ def run_scenario(
         active_events = [
             (r, e) for r, e in events if sim_start <= r.wall_time <= sim_stop
         ]
+        if trace_process is not None and trace_process.poll() is not None:
+            trace_status = f"stopped early with exit {trace_process.returncode}"
         summary = [
             f"simulator_exit={sim_exit}",
             f"app_exit_at_assert={app_process.poll()}",
             f"simulator_elapsed_s={sim_stop - sim_start:.3f}",
             f"app_events_in_window={len(active_events)}",
+            f"can_trace={trace_status}",
         ]
 
-        if scenario in {"normal", "warning", "critical"}:
+        if scenario == "invalid_configuration":
+            sim_errors = [
+                r.line
+                for r in records
+                if r.source == "simulator" and r.stream == "stderr"
+            ]
+            app_timeouts = [e for _, e in events if e.get("status") == "RADAR_TIMEOUT"]
+            if not any(
+                "SIM_ERROR --period-ms must be finite and greater than zero" in line
+                for line in sim_errors
+            ):
+                raise ScenarioFailure(
+                    "simulator did not report invalid period configuration"
+                )
+            if not app_timeouts:
+                raise ScenarioFailure(
+                    "app should remain alive and report RADAR_TIMEOUT with no valid input"
+                )
+            if app_process.poll() is not None:
+                raise ScenarioFailure(
+                    "app exited after simulator configuration failure"
+                )
+            summary.extend(
+                [
+                    "simulator_validation=period_ms_rejected_exit_2",
+                    "app_behavior=RADAR_TIMEOUT_alive_without_input",
+                ]
+            )
+        elif scenario in {"normal", "warning", "critical"}:
             wanted = (
                 expected_level
                 or {"normal": "NONE", "warning": "WARNING", "critical": "CRITICAL"}[
@@ -432,7 +536,7 @@ def run_scenario(
                     f"vehicle_tx_after_silence={len(post_phase_vehicle)}",
                 ]
             )
-        else:
+        elif scenario == "invalid_signal":
             invalid = [
                 (r, e)
                 for r, e in active_events
@@ -458,6 +562,90 @@ def run_scenario(
             summary.append(
                 "invalid_state=INVALID_INPUT source=VehicleState reason=OUT_OF_RANGE"
             )
+        elif scenario == "invalid_can_id":
+            injected = [
+                r
+                for r in sim_records
+                if "id=0x321" in r.line and "fault=UNKNOWN_ID" in r.line
+            ]
+            stable = [
+                e
+                for _, e in active_events
+                if e.get("status") == "OK" and e.get("WarningLevel") == "NONE"
+            ]
+            if not injected or not stable:
+                raise ScenarioFailure(
+                    "unknown CAN ID must be transmitted and ignored while valid traffic keeps state OK/NONE"
+                )
+            unexpected = [
+                (e.get("status"), e.get("WarningLevel"))
+                for _, e in active_events
+                if e.get("status") != "OK" or e.get("WarningLevel") != "NONE"
+            ]
+            if unexpected:
+                raise ScenarioFailure(
+                    f"unknown CAN ID changed expected OK/NONE application state: {unexpected}"
+                )
+            summary.append("invalid_can_id=ignored; valid_state=OK/NONE")
+        elif scenario == "wrong_dlc":
+            injected = [
+                r
+                for r in sim_records
+                if "id=0x200" in r.line
+                and "dlc=7" in r.line
+                and "fault=WRONG_DLC" in r.line
+            ]
+            invalid = [
+                e
+                for _, e in active_events
+                if e.get("status") == "INVALID_INPUT"
+                and e.get("reason") == "WRONG_DLC"
+                and e.get("source") == "RadarObject"
+            ]
+            diagnostics = [
+                r.line
+                for r in records
+                if r.source == "app"
+                and r.stream == "stderr"
+                and "DECODE_ERROR reason=WRONG_DLC id=0x200" in r.line
+            ]
+            if not injected or not invalid or not diagnostics:
+                raise ScenarioFailure(
+                    "wrong radar DLC must produce INVALID_INPUT/WRONG_DLC and its application diagnostic"
+                )
+            if any(e.get("status") == "OK" for _, e in active_events):
+                raise ScenarioFailure(
+                    "risk state emitted during malformed radar traffic"
+                )
+            summary.append(
+                "wrong_dlc=INVALID_INPUT source=RadarObject reason=WRONG_DLC"
+            )
+        elif scenario == "high_frequency":
+            transmissions = [r for r in sim_records if r.line.startswith("SIM_TX ")]
+            high_frequency_events = [
+                (r, e) for r, e in events if sim_start_wall <= r.wall_time <= sim_stop
+            ]
+            warnings = [
+                e
+                for _, e in high_frequency_events
+                if e.get("status") == "OK" and e.get("WarningLevel") == "WARNING"
+            ]
+            if len(transmissions) < 1000 or not warnings:
+                raise ScenarioFailure(
+                    f"high frequency traffic must send at least 1000 frames and produce OK/WARNING (sent {len(transmissions)})"
+                )
+            unexpected = [
+                (e.get("status"), e.get("WarningLevel"))
+                for _, e in high_frequency_events
+                if e.get("status") != "OK" or e.get("WarningLevel") != "WARNING"
+            ]
+            if unexpected:
+                raise ScenarioFailure(
+                    f"valid high-frequency traffic left expected OK/WARNING state: {unexpected}"
+                )
+            summary.append(
+                f"high_frequency_frames={len(transmissions)} expected_state=OK/WARNING"
+            )
 
         if app_process.poll() is not None:
             raise ScenarioFailure(
@@ -481,14 +669,34 @@ def run_scenario(
         failure = f"unexpected test error: {type(error).__name__}: {error}"
         unexpected_failure = True
     finally:
-        for process, name in ((simulator_process, "simulator"), (app_process, "app")):
+        for process, name in (
+            (simulator_process, "simulator"),
+            (app_process, "app"),
+            (trace_process, "candump"),
+        ):
             was_forced, message = _terminate(process, name)
             forced_kill = forced_kill or was_forced
             if message:
                 cleanup_failure = (
                     f"{cleanup_failure}; {message}" if cleanup_failure else message
                 )
-            if process is not None and process.returncode not in (None, 0):
+            expected_simulator_config_error = (
+                process is not None
+                and name == "simulator"
+                and scenario == "invalid_configuration"
+                and process.returncode == 2
+            )
+            expected_trace_exit = (
+                name == "candump"
+                and process is not None
+                and process.returncode in (0, -signal.SIGTERM, 128 + signal.SIGTERM)
+            )
+            if (
+                process is not None
+                and process.returncode not in (None, 0)
+                and not expected_simulator_config_error
+                and not expected_trace_exit
+            ):
                 message = f"{name} exited with unexpected code {process.returncode}"
                 cleanup_failure = (
                     f"{cleanup_failure}; {message}" if cleanup_failure else message
@@ -525,6 +733,16 @@ def run_scenario(
                 output.write(
                     f"simulator_exit_code={_normalized_exit(simulator_process)}\n"
                 )
+                if trace_process is None:
+                    output.write(f"can_trace_final={trace_status}\n")
+                else:
+                    trace_lines = sum(
+                        1 for _ in (log_path / "candump.stdout.log").open()
+                    )
+                    output.write(
+                        f"can_trace_final=stopped exit_code={_normalized_exit(trace_process)} "
+                        f"frames={trace_lines}\n"
+                    )
         except OSError as error:
             report_failure = f"unable to finalize scenario summary: {error}"
             failure = f"{failure}; {report_failure}" if failure else report_failure

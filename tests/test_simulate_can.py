@@ -53,6 +53,9 @@ class SimulatorContractTests(unittest.TestCase):
             "critical": ("2003000000000000", "6400E80301000000"),
             "radar_timeout": ("F401000000000000", "E803000001000000"),
             "invalid_signal": ("C20B000000000000", "E803000001000000"),
+            "invalid_can_id": ("F401000000000000", "E803000001000000"),
+            "wrong_dlc": ("F401000000000000", "E803000001000000"),
+            "high_frequency": ("2003000000000000", "C800BC0201000000"),
         }
         for scenario, payloads in expected.items():
             with self.subTest(scenario=scenario):
@@ -241,9 +244,45 @@ class CliValidationTests(unittest.TestCase):
             with self.subTest(args=args), self.assertRaises(ValueError):
                 simulate_can.parse_config(args)
 
+    def test_fault_cli_configuration_contracts(self):
+        high_frequency = simulate_can.parse_config(["--scenario", "high_frequency"])
+        self.assertEqual(high_frequency.period_ms, 1)
+        with self.assertRaisesRegex(ValueError, "finite and greater than zero"):
+            simulate_can.parse_config(["--scenario", "invalid_configuration"])
+        with self.assertRaisesRegex(ValueError, "no greater than 10"):
+            simulate_can.parse_config(
+                ["--scenario", "high_frequency", "--period-ms", "20"]
+            )
+
     def test_relative_default_dbc_is_script_independent(self):
         self.assertEqual(simulate_can.DEFAULT_DBC, ROOT / "dbc" / "vehicle.dbc")
         self.assertTrue(simulate_can.DEFAULT_DBC.is_absolute())
+
+
+class FaultScheduleTests(SchedulerTests):
+    def test_invalid_id_is_injected_alongside_valid_normal_frames(self):
+        config = simulate_can.Config(
+            "invalid_can_id", "vcan0", Path("unused"), 100, 0.11, None
+        )
+        bus, result = self.schedule(config)
+        self.assertEqual(result[0], "completed")
+        ids = [frame_id for frame_id, _ in bus.messages]
+        self.assertIn(0x100, ids)
+        self.assertIn(0x200, ids)
+        self.assertIn(0x321, ids)
+
+    def test_wrong_dlc_sends_seven_byte_radar_frame(self):
+        config = simulate_can.Config(
+            "wrong_dlc", "vcan0", Path("unused"), 100, 0.11, None
+        )
+        bus, result = self.schedule(config)
+        self.assertEqual(result[0], "completed")
+        malformed = [
+            payload
+            for frame_id, payload in bus.messages
+            if frame_id == 0x200 and len(payload) == 7
+        ]
+        self.assertTrue(malformed)
 
 
 if __name__ == "__main__":

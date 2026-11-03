@@ -6,7 +6,6 @@ from __future__ import annotations
 import argparse
 import importlib.util
 import signal
-import socket
 import sys
 import time
 from pathlib import Path
@@ -23,7 +22,17 @@ from automation_common import (
 sys.path.insert(0, str(ROOT / "integration"))
 import common as integration_common  # noqa: E402
 
-SCENARIOS = ("normal", "warning", "critical", "radar_timeout", "invalid_signal")
+SCENARIOS = (
+    "normal",
+    "warning",
+    "critical",
+    "radar_timeout",
+    "invalid_signal",
+    "invalid_can_id",
+    "wrong_dlc",
+    "high_frequency",
+    "invalid_configuration",
+)
 
 
 def parser() -> argparse.ArgumentParser:
@@ -49,21 +58,7 @@ def integration_preflight(app: Path, interface: str) -> str | None:
         or importlib.util.find_spec("cantools") is None
     ):
         return "missing python-can/cantools; activate the project venv and install requirements.txt"
-    try:
-        socket.if_nametoindex(interface)
-        interface_type = int(
-            (Path("/sys/class/net") / interface / "type").read_text().strip()
-        )
-        flags = int(
-            (Path("/sys/class/net") / interface / "flags").read_text().strip(), 16
-        )
-    except (OSError, ValueError) as error:
-        return f"CAN interface {interface!r} is unavailable: {error}; configure an UP vcan interface first"
-    if interface_type != 280:
-        return f"interface {interface!r} is not vcan (ARPHRD_CAN=280)"
-    if not flags & 1:
-        return f"vcan interface {interface!r} is down"
-    return None
+    return integration_common.virtual_can_problem(interface)
 
 
 def main(argv: list[str] | None = None) -> int:
