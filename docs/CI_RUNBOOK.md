@@ -56,7 +56,7 @@ bash scripts/setup_vcan.sh
 
 Controller kiểm chứng được đặt dưới `build-jenkins/` (ignored), bind `127.0.0.1:8080`, chạy bằng user ice. Tài khoản `admin`, mật khẩu riêng ở `build-jenkins/home/admin-password` (quyền 0600); không dùng mật khẩu sudo làm mật khẩu Jenkins. Kết nối qua SSH tunnel `ssh -L 8080:127.0.0.1:8080 <user>@<server>` rồi mở localhost:8080.
 
-Job `adas-validation` dùng local SCM nhánh feature hiện tại để kiểm chứng trước khi push. Đây là job validation, chưa chứng minh trigger GitHub/main hoặc repository rules. Cấu hình cho phép local Git checkout chỉ dành cho controller lab này. Chi tiết runs thực xem ACCEPTANCE.md.
+Job `adas-validation` hiện dùng local SCM nhánh `main` sau khi merge phần triển khai. Các runs #1/#2 trong evidence lịch sử chạy trên nhánh feature trước khi merge. Job local chưa chứng minh trigger từ GitHub hoặc repository rules. Cấu hình cho phép local Git checkout chỉ dành cho controller lab này. Chi tiết runs thực xem ACCEPTANCE.md.
 
 Khởi động lại controller đã provision: `bash scripts/start_jenkins_lab.sh`. Template systemd `scripts/systemd/adas-jenkins.service.in` dùng placeholders `@USER@` và `@PROJECT@`; thay bằng user thường và đường dẫn clone rồi cài vào `/etc/systemd/system/adas-jenkins.service`. Dừng controller cũ trước khi bật service để tránh tranh port 8080. Không commit thư mục build-jenkins vì chứa tài khoản, logs và state.
 
