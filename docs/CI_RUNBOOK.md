@@ -54,6 +54,10 @@ bash scripts/setup_vcan.sh
 
 ## Jenkins local trên server đồ án
 
+Truy cập qua Nginx port 80: **http://jenkins.ice.tech**. Trên máy dùng trình
+duyệt, thêm `192.168.222.129 jenkins.ice.tech` vào hosts nếu chưa có DNS phù hợp.
+Xem [cấu hình và hướng dẫn reverse proxy](JENKINS_PROXY.md).
+
 Controller kiểm chứng được đặt dưới `build-jenkins/` (ignored), bind `127.0.0.1:8080`, chạy bằng user ice. Tài khoản `admin`, mật khẩu riêng ở `build-jenkins/home/admin-password` (quyền 0600); không dùng mật khẩu sudo làm mật khẩu Jenkins. Kết nối qua SSH tunnel `ssh -L 8080:127.0.0.1:8080 <user>@<server>` rồi mở localhost:8080.
 
 Job `adas-validation` hiện dùng local SCM nhánh `main` sau khi merge phần triển khai. Các runs #1/#2 trong evidence lịch sử chạy trên nhánh feature trước khi merge. Job local chưa chứng minh trigger từ GitHub hoặc repository rules. Cấu hình cho phép local Git checkout chỉ dành cho controller lab này. Chi tiết runs thực xem ACCEPTANCE.md.
