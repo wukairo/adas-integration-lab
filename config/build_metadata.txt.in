@@ -1,0 +1,6 @@
+git_commit=@ADAS_GIT_COMMIT@
+source_dirty=@ADAS_SOURCE_DIRTY@
+compiler_id=@CMAKE_CXX_COMPILER_ID@
+compiler_version=@CMAKE_CXX_COMPILER_VERSION@
+compiler=@CMAKE_CXX_COMPILER@
+build_type=@CMAKE_BUILD_TYPE@

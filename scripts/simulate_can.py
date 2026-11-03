@@ -31,7 +31,17 @@ else:
 
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_DBC = ROOT / "dbc" / "vehicle.dbc"
-SCENARIOS = ("normal", "warning", "critical", "radar_timeout", "invalid_signal")
+SCENARIOS = (
+    "normal",
+    "warning",
+    "critical",
+    "radar_timeout",
+    "invalid_signal",
+    "invalid_can_id",
+    "wrong_dlc",
+    "high_frequency",
+    "invalid_configuration",
+)
 
 
 class SimulatorError(Exception):
@@ -77,6 +87,18 @@ SCENARIO_DATA = {
         {"ObjectDistance": 100, "RelativeVelocity": 0, "ObjectValid": 1},
         invalid_vehicle=True,
     ),
+    "invalid_can_id": Scenario(
+        {"VehicleSpeed": 50, "SteeringAngle": 0, "BrakeStatus": 0},
+        {"ObjectDistance": 100, "RelativeVelocity": 0, "ObjectValid": 1},
+    ),
+    "wrong_dlc": Scenario(
+        {"VehicleSpeed": 50, "SteeringAngle": 0, "BrakeStatus": 0},
+        {"ObjectDistance": 100, "RelativeVelocity": 0, "ObjectValid": 1},
+    ),
+    "high_frequency": Scenario(
+        {"VehicleSpeed": 80, "SteeringAngle": 0, "BrakeStatus": 0},
+        {"ObjectDistance": 20, "RelativeVelocity": 7, "ObjectValid": 1},
+    ),
 }
 
 EXPECTED_MESSAGES = {
@@ -89,7 +111,17 @@ EXPECTED_SIGNALS = {
     "SteeringAngle": ("VehicleState", 16, 16, "little_endian", True, 0.1, 0, -720, 720),
     "BrakeStatus": ("VehicleState", 32, 1, "little_endian", False, 1, 0, 0, 1),
     "ObjectDistance": ("RadarObject", 0, 16, "little_endian", False, 0.1, 0, 0, 500),
-    "RelativeVelocity": ("RadarObject", 16, 16, "little_endian", True, 0.01, 0, -100, 100),
+    "RelativeVelocity": (
+        "RadarObject",
+        16,
+        16,
+        "little_endian",
+        True,
+        0.01,
+        0,
+        -100,
+        100,
+    ),
     "ObjectValid": ("RadarObject", 32, 1, "little_endian", False, 1, 0, 0, 1),
 }
 
@@ -107,6 +139,8 @@ def build_parser() -> argparse.ArgumentParser:
 
 def parse_config(argv: Iterable[str] | None = None) -> Config:
     args = build_parser().parse_args(argv)
+    if args.scenario == "invalid_configuration":
+        args.period_ms = 0
     period_s = args.period_ms / 1000.0
     for name, value in (("period-ms", args.period_ms), ("duration-s", args.duration_s)):
         if not math.isfinite(value) or value <= 0:
@@ -114,7 +148,9 @@ def parse_config(argv: Iterable[str] | None = None) -> Config:
     if period_s < time.get_clock_info("monotonic").resolution:
         raise ValueError("--period-ms is below the monotonic clock resolution")
     if not args.interface or len(args.interface) >= 16 or "/" in args.interface:
-        raise ValueError("--interface must be a Linux interface name shorter than 16 characters")
+        raise ValueError(
+            "--interface must be a Linux interface name shorter than 16 characters"
+        )
     if args.scenario == "radar_timeout":
         warmup_s = 1.0 if args.warmup_s is None else args.warmup_s
         if not math.isfinite(warmup_s) or warmup_s <= 0:
@@ -127,11 +163,17 @@ def parse_config(argv: Iterable[str] | None = None) -> Config:
             raise ValueError("radar_timeout requires at least 1 second of silence")
     elif args.warmup_s is not None:
         raise ValueError("--warmup-s is only valid for radar_timeout")
+    if args.scenario == "high_frequency" and args.period_ms == 100:
+        period_ms = 1.0
+    else:
+        period_ms = args.period_ms
+    if args.scenario == "high_frequency" and period_ms > 10:
+        raise ValueError("high_frequency requires --period-ms no greater than 10")
     return Config(
         args.scenario,
         args.interface,
         args.dbc,
-        args.period_ms,
+        period_ms,
         args.duration_s,
         warmup_s if args.scenario == "radar_timeout" else None,
     )
@@ -157,7 +199,9 @@ def load_and_validate_dbc(path: Path):
                 message.is_fd,
             )
             if actual != expected:
-                raise SimulatorError(f"DBC contract mismatch for {name}: expected {expected}, got {actual}")
+                raise SimulatorError(
+                    f"DBC contract mismatch for {name}: expected {expected}, got {actual}"
+                )
         expected_by_message = {
             "VehicleState": {"VehicleSpeed", "SteeringAngle", "BrakeStatus"},
             "RadarObject": {"ObjectDistance", "RelativeVelocity", "ObjectValid"},
@@ -171,7 +215,17 @@ def load_and_validate_dbc(path: Path):
                     f"expected {sorted(expected_names)}, got {sorted(actual_names)}"
                 )
         for name, expected in EXPECTED_SIGNALS.items():
-            message_name, start, length, byte_order, signed, scale, offset, minimum, maximum = expected
+            (
+                message_name,
+                start,
+                length,
+                byte_order,
+                signed,
+                scale,
+                offset,
+                minimum,
+                maximum,
+            ) = expected
             message = database.get_message_by_name(message_name)
             signal_def = message.get_signal_by_name(name)
             actual = (
@@ -184,21 +238,34 @@ def load_and_validate_dbc(path: Path):
                 signal_def.minimum,
                 signal_def.maximum,
             )
-            wanted = (start, length, byte_order, signed, scale, offset, minimum, maximum)
+            wanted = (
+                start,
+                length,
+                byte_order,
+                signed,
+                scale,
+                offset,
+                minimum,
+                maximum,
+            )
             if actual != wanted:
-                raise SimulatorError(f"DBC contract mismatch for {name}: expected {wanted}, got {actual}")
+                raise SimulatorError(
+                    f"DBC contract mismatch for {name}: expected {wanted}, got {actual}"
+                )
     except KeyError as error:
         raise SimulatorError(f"DBC is missing message or signal {error}") from error
     return database
 
 
 def encode_scenario(database, scenario_name: str) -> tuple[bytes, bytes]:
-    """Encode a scenario using the DBC; only invalid_signal relaxes range checks."""
+    """Encode valid DBC payloads; fault scenarios alter frames at transmit time."""
     scenario = SCENARIO_DATA[scenario_name]
     vehicle = database.get_message_by_name("VehicleState").encode(
         scenario.vehicle, strict=not scenario.invalid_vehicle
     )
-    radar = database.get_message_by_name("RadarObject").encode(scenario.radar, strict=True)
+    radar = database.get_message_by_name("RadarObject").encode(
+        scenario.radar, strict=True
+    )
     return bytes(vehicle), bytes(radar)
 
 
@@ -230,7 +297,12 @@ def run_schedule(
     next_tick = 0
     phase_logged = False
     scenario = config.scenario
-    fault = " fault=VehicleSpeedOutOfRange" if scenario == "invalid_signal" else ""
+    fault = {
+        "invalid_signal": " fault=VehicleSpeedOutOfRange",
+        "invalid_can_id": " fault=UnknownCanId(0x321)",
+        "wrong_dlc": " fault=RadarObjectDlc(7)",
+        "high_frequency": " fault=HighFrequency",
+    }.get(scenario, "")
     warmup_log = f" warmup_s={warmup:g}" if warmup is not None else ""
     _log(
         f"SIM_START scenario={scenario} interface={config.interface} "
@@ -262,16 +334,38 @@ def run_schedule(
                 f"id=0x100 dlc=8 data={vehicle_payload.hex().upper()}"
             )
             elapsed = clock() - start
-            if scenario != "radar_timeout" or (warmup is not None and elapsed < warmup):
+            if scenario not in {"radar_timeout", "wrong_dlc"} or (
+                scenario == "radar_timeout" and warmup is not None and elapsed < warmup
+            ):
                 remaining = duration - elapsed
                 if remaining > 0:
-                    bus.send(_message(0x200, radar_payload), timeout=min(1.0, remaining))
+                    bus.send(
+                        _message(0x200, radar_payload), timeout=min(1.0, remaining)
+                    )
                     radar_count += 1
                     _log(
                         f"SIM_TX t_ms={_elapsed_ms(start, clock)} scenario={scenario} "
                         f"id=0x200 dlc=8 data={radar_payload.hex().upper()}"
                     )
-            elif not phase_logged:
+            if scenario == "invalid_can_id" and duration - (clock() - start) > 0:
+                bus.send(_message(0x321, vehicle_payload), timeout=timeout)
+                _log(
+                    f"SIM_TX t_ms={_elapsed_ms(start, clock)} scenario={scenario} "
+                    f"id=0x321 dlc=8 data={vehicle_payload.hex().upper()} fault=UNKNOWN_ID"
+                )
+            elif scenario == "wrong_dlc" and duration - (clock() - start) > 0:
+                malformed = radar_payload[:-1]
+                bus.send(_message(0x200, malformed), timeout=timeout)
+                _log(
+                    f"SIM_TX t_ms={_elapsed_ms(start, clock)} scenario={scenario} "
+                    f"id=0x200 dlc=7 data={malformed.hex().upper()} fault=WRONG_DLC"
+                )
+            elif (
+                scenario == "radar_timeout"
+                and warmup is not None
+                and elapsed >= warmup
+                and not phase_logged
+            ):
                 _log(f"SIM_PHASE t_ms={_elapsed_ms(start, clock)} phase=radar_silence")
                 phase_logged = True
         except Exception as error:
@@ -299,11 +393,20 @@ def _message(arbitration_id: int, payload: bytes):
 
 
 def run(config: Config, dbc_path: Path) -> int:
+    if config.scenario == "invalid_configuration":
+        raise SimulatorError(
+            "injected invalid configuration: --period-ms must be greater than zero"
+        )
     database = load_and_validate_dbc(dbc_path)
     try:
-        vehicle_payload, radar_payload = encode_scenario(database, config.scenario)
+        payload_scenario = (
+            "warning" if config.scenario == "high_frequency" else config.scenario
+        )
+        vehicle_payload, radar_payload = encode_scenario(database, payload_scenario)
     except Exception as error:
-        raise SimulatorError(f"unable to encode scenario {config.scenario}: {error}") from error
+        raise SimulatorError(
+            f"unable to encode scenario {config.scenario}: {error}"
+        ) from error
     if can is None:
         raise SimulatorError(
             "missing Python dependency; create .venv and install requirements.txt"
@@ -312,7 +415,9 @@ def run(config: Config, dbc_path: Path) -> int:
     try:
         bus = can.Bus(interface="socketcan", channel=config.interface)
     except Exception as error:
-        raise SimulatorError(f"unable to open SocketCAN interface {config.interface}: {error}") from error
+        raise SimulatorError(
+            f"unable to open SocketCAN interface {config.interface}: {error}"
+        ) from error
 
     interrupted = False
     previous_handlers = {}
@@ -354,7 +459,11 @@ def main(argv: Iterable[str] | None = None) -> int:
         _log(f"SIM_ERROR {error}", stream=sys.stderr)
         return 2
     try:
-        dbc_path = config.dbc_path if config.dbc_path.is_absolute() else Path.cwd() / config.dbc_path
+        dbc_path = (
+            config.dbc_path
+            if config.dbc_path.is_absolute()
+            else Path.cwd() / config.dbc_path
+        )
         return run(config, dbc_path.resolve())
     except SimulatorError as error:
         _log(f"SIM_ERROR {error}", stream=sys.stderr)

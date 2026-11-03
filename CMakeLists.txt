@@ -1,6 +1,24 @@
 cmake_minimum_required(VERSION 3.16)
-project(adas_integration_lab VERSION 0.1.0 LANGUAGES CXX)
+project(adas_integration_lab VERSION 1.0.0 LANGUAGES CXX)
 include(CTest)
+
+# Record the configured source/toolchain identity used by release packaging.
+find_package(Git QUIET)
+set(ADAS_GIT_COMMIT "unknown")
+set(ADAS_SOURCE_DIRTY "true")
+if(GIT_FOUND)
+    execute_process(COMMAND "${GIT_EXECUTABLE}" rev-parse HEAD
+        WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
+        OUTPUT_VARIABLE ADAS_GIT_COMMIT OUTPUT_STRIP_TRAILING_WHITESPACE)
+    execute_process(COMMAND "${GIT_EXECUTABLE}" diff --quiet HEAD --
+        src include CMakeLists.txt dbc config
+        WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
+        RESULT_VARIABLE ADAS_DIRTY_RESULT)
+    if(ADAS_DIRTY_RESULT EQUAL 0)
+        set(ADAS_SOURCE_DIRTY "false")
+    endif()
+endif()
+configure_file(config/build_metadata.txt.in build_metadata.txt @ONLY)
 
 add_library(adas_core src/collision_warning.cpp)
 target_include_directories(adas_core PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include")
@@ -12,7 +30,7 @@ target_include_directories(adas_decoder PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/incl
 target_compile_features(adas_decoder PUBLIC cxx_std_17)
 set_target_properties(adas_decoder PROPERTIES CXX_EXTENSIONS OFF)
 
-add_library(adas_runtime src/adas_runtime.cpp)
+add_library(adas_runtime src/adas_runtime.cpp src/adas_config.cpp)
 target_include_directories(adas_runtime PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include")
 target_link_libraries(adas_runtime PUBLIC adas_core adas_decoder)
 target_compile_features(adas_runtime PUBLIC cxx_std_17)
@@ -54,7 +72,18 @@ if(BUILD_TESTING)
     target_link_libraries(test_adas_runtime PRIVATE adas_runtime GTest::gtest_main)
     gtest_discover_tests(test_adas_runtime)
 
-    list(APPEND adas_targets test_collision_warning test_can_decoder test_adas_runtime)
+    add_executable(test_adas_config tests/test_adas_config.cpp)
+    target_link_libraries(test_adas_config PRIVATE adas_runtime GTest::gtest_main)
+    target_compile_definitions(test_adas_config PRIVATE
+        ADAS_CONFIG_PATH="${CMAKE_CURRENT_SOURCE_DIR}/config/adas.yaml")
+    if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+        target_compile_definitions(test_adas_config PRIVATE
+            ADAS_APP_PATH="$<TARGET_FILE:adas_app>")
+    endif()
+    add_dependencies(test_adas_config adas_app)
+    gtest_discover_tests(test_adas_config)
+
+    list(APPEND adas_targets test_collision_warning test_can_decoder test_adas_runtime test_adas_config)
 endif()
 
 foreach(target IN LISTS adas_targets)

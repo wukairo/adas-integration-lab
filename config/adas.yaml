@@ -1,0 +1,4 @@
+warning_ttc_s: 4.0
+critical_ttc_s: 2.0
+radar_timeout_ms: 500
+vehicle_timeout_ms: 500
