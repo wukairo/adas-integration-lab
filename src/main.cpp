@@ -147,7 +147,7 @@ void printUsage() {
   std::cerr << "Usage: adas_app <speed_kmh> <distance_m> <closing_speed_mps>\n"
                "       adas_app --can <interface>\n"
                "       adas_app --decode <interface>\n"
-               "       adas_app --adas <interface>\n";
+               "       adas_app --adas <interface> [--config <path>]\n";
 }
 
 bool parseNumber(const std::string &token, double &value) {
@@ -189,7 +189,16 @@ void printRuntimeUpdate(const AdasRuntime::Update &update) {
   }
 }
 
-int runAdas(const std::string &interface_name) {
+int runAdas(const std::string &interface_name, const std::string &config_path) {
+  AdasConfig config;
+  if (!config_path.empty()) {
+    try {
+      config = loadAdasConfig(config_path);
+    } catch (const std::exception &error) {
+      std::cerr << "Invalid ADAS config: " << error.what() << '\n';
+      return 2;
+    }
+  }
   struct sigaction action{};
   action.sa_handler = requestStop;
   sigemptyset(&action.sa_mask);
@@ -202,9 +211,11 @@ int runAdas(const std::string &interface_name) {
   try {
     CanReceiver receiver(interface_name);
     const auto started_at = AdasRuntime::Clock::now();
-    AdasRuntime runtime(started_at);
+    AdasRuntime runtime(started_at, config);
     std::cout << "ADAS_READY interface=" << interface_name
-              << " radar_timeout_ms=500 vehicle_timeout_ms=500\n"
+              << " radar_timeout_ms=" << std::setprecision(15)
+              << config.radar_timeout_ms << " vehicle_timeout_ms="
+              << config.vehicle_timeout_ms << '\n'
               << std::flush;
     printRuntimeUpdate(runtime.tick(started_at));
     while (stop_requested == 0) {
@@ -246,12 +257,14 @@ int main(int argc, char *argv[]) {
     return runCanReceiver(argv[2], true);
   }
   if (argc >= 2 && std::string(argv[1]) == "--adas") {
-    if (argc != 3) {
+    if (argc != 3 &&
+        !(argc == 5 && std::string(argv[3]) == "--config" &&
+          std::string(argv[4]).size() > 0)) {
       printUsage();
       return 2;
     }
     stop_requested = 0;
-    return runAdas(argv[2]);
+    return runAdas(argv[2], argc == 5 ? argv[4] : "");
   }
 #else
   if (argc >= 2 && std::string(argv[1]) == "--can") {
@@ -271,7 +284,9 @@ int main(int argc, char *argv[]) {
     return 1;
   }
   if (argc >= 2 && std::string(argv[1]) == "--adas") {
-    if (argc != 3) {
+    if (argc != 3 &&
+        !(argc == 5 && std::string(argv[3]) == "--config" &&
+          std::string(argv[4]).size() > 0)) {
       printUsage();
       return 2;
     }

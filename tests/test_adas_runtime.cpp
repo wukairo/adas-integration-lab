@@ -171,3 +171,23 @@ TEST(AdasRuntime, RepeatedStateIsQuietAndTimeoutRecoveryCanTimeoutAgain) {
   update = runtime.tick(kStart + std::chrono::milliseconds(1110));
   EXPECT_EQ(lastStatus(update), "RADAR_TIMEOUT");
 }
+
+TEST(AdasRuntime, UsesConfiguredCollisionThresholdsAndFreshnessLimits) {
+  AdasConfig config;
+  config.critical_ttc_s = 1.0;
+  config.warning_ttc_s = 2.5;
+  config.radar_timeout_ms = 150.0;
+  config.vehicle_timeout_ms = 80.0;
+  AdasRuntime runtime(kStart, config);
+
+  runtime.onFrame(vehicle(), kStart);
+  auto update = runtime.onFrame(radar(200, 1000), kStart);
+  ASSERT_EQ(lastStatus(update), "OK");
+  EXPECT_EQ(*update.events.back().warning_level, WarningLevel::WARNING);
+
+  EXPECT_TRUE(runtime.tick(kStart + std::chrono::milliseconds(79)).events.empty());
+  EXPECT_EQ(lastStatus(runtime.tick(kStart + std::chrono::milliseconds(80))),
+            "VEHICLE_TIMEOUT");
+  EXPECT_EQ(lastStatus(runtime.tick(kStart + std::chrono::milliseconds(150))),
+            "RADAR_TIMEOUT");
+}

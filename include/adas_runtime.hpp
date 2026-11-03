@@ -1,5 +1,6 @@
 #pragma once
 
+#include "adas_config.hpp"
 #include "can_frame.hpp"
 #include "collision_warning.hpp"
 
@@ -36,6 +37,7 @@ public:
   };
 
   explicit AdasRuntime(Clock::time_point started_at);
+  AdasRuntime(Clock::time_point started_at, AdasConfig config);
   Update onFrame(const CanFrame &frame, Clock::time_point now);
   Update tick(Clock::time_point now);
 
@@ -49,6 +51,7 @@ private:
     bool operator==(const State &other) const;
   };
   Clock::time_point started_at_;
+  AdasConfig config_;
   Clock::time_point last_vehicle_at_{};
   Clock::time_point last_radar_at_{};
   bool have_vehicle_{};

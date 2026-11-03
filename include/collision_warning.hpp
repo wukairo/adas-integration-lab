@@ -9,3 +9,6 @@ enum class WarningLevel { NONE, WARNING, CRITICAL };
 // Throws std::invalid_argument when an input is invalid.
 WarningLevel evaluateCollisionRisk(double vehicle_speed_kmh, double distance_m,
                                    double relative_velocity_mps);
+WarningLevel evaluateCollisionRisk(double vehicle_speed_kmh, double distance_m,
+                                   double relative_velocity_mps,
+                                   double critical_ttc_s, double warning_ttc_s);

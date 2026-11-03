@@ -68,3 +68,15 @@ TEST(CollisionWarning, RejectsEveryNonfiniteInput) {
     EXPECT_THROW(evaluateCollisionRisk(80, 0, value), std::invalid_argument);
   }
 }
+
+TEST(CollisionWarning, AppliesConfiguredTtcThresholdsAndValidatesTheirOrder) {
+  EXPECT_EQ(evaluateCollisionRisk(80, 20, 10, 1.0, 2.5),
+            WarningLevel::WARNING);
+  EXPECT_EQ(evaluateCollisionRisk(80, 20, 10, 2.0, 4.0),
+            WarningLevel::CRITICAL);
+  EXPECT_THROW(evaluateCollisionRisk(80, 20, 10, 2.5, 2.5),
+               std::invalid_argument);
+  EXPECT_THROW(evaluateCollisionRisk(80, 20, 10,
+                                     std::numeric_limits<double>::infinity(), 4.0),
+               std::invalid_argument);
+}

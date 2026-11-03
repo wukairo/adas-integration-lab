@@ -33,7 +33,12 @@ double milliseconds(AdasRuntime::Clock::duration duration) {
 } // namespace
 
 AdasRuntime::AdasRuntime(Clock::time_point started_at)
-    : started_at_(started_at) {}
+    : AdasRuntime(started_at, AdasConfig{}) {}
+
+AdasRuntime::AdasRuntime(Clock::time_point started_at, AdasConfig config)
+    : started_at_(started_at), config_(std::move(config)) {
+  config_.validate();
+}
 
 AdasRuntime::Update AdasRuntime::onFrame(const CanFrame &frame,
                                          Clock::time_point now) {
@@ -93,9 +98,13 @@ AdasRuntime::Update AdasRuntime::evaluate(Clock::time_point now) {
   State state;
   const auto radar_reference = have_radar_ ? last_radar_at_ : started_at_;
   const auto radar_age = now - radar_reference;
-  const bool radar_timed_out = radar_age >= kRadarTimeout;
+  const bool radar_timed_out =
+      radar_age >= std::chrono::duration<double, std::milli>(
+                       config_.radar_timeout_ms);
   const bool vehicle_timed_out =
-      have_vehicle_ && now - last_vehicle_at_ >= kVehicleTimeout;
+      have_vehicle_ &&
+      now - last_vehicle_at_ >= std::chrono::duration<double, std::milli>(
+                                    config_.vehicle_timeout_ms);
 
   if (radar_timed_out) {
     state = {"RADAR_TIMEOUT", "RADAR_STALE", std::nullopt, std::nullopt};
@@ -114,7 +123,8 @@ AdasRuntime::Update AdasRuntime::evaluate(Clock::time_point now) {
   } else {
     state = {
         "OK", "RISK_EVALUATED",
-        evaluateCollisionRisk(speed_kmh_, distance_m_, relative_velocity_mps_),
+        evaluateCollisionRisk(speed_kmh_, distance_m_, relative_velocity_mps_,
+                              config_.critical_ttc_s, config_.warning_ttc_s),
         std::nullopt};
   }
 
