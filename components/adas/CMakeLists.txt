@@ -1,0 +1,16 @@
+cmake_minimum_required(VERSION 3.16)
+project(adas_component LANGUAGES CXX)
+include(CTest)
+
+add_library(adas_core src/collision_warning.cpp)
+target_include_directories(adas_core PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include")
+target_compile_features(adas_core PUBLIC cxx_std_17)
+set_target_properties(adas_core PROPERTIES CXX_EXTENSIONS OFF)
+
+if(BUILD_TESTING)
+    find_package(GTest CONFIG REQUIRED)
+    include(GoogleTest)
+    add_executable(test_collision_warning tests/test_collision_warning.cpp)
+    target_link_libraries(test_collision_warning PRIVATE adas_core GTest::gtest_main)
+    gtest_discover_tests(test_collision_warning)
+endif()

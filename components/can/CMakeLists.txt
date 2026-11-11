@@ -1,0 +1,23 @@
+cmake_minimum_required(VERSION 3.16)
+project(can_component LANGUAGES CXX)
+include(CTest)
+
+add_library(adas_decoder src/can_decoder.cpp)
+target_include_directories(adas_decoder PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include")
+target_compile_features(adas_decoder PUBLIC cxx_std_17)
+set_target_properties(adas_decoder PROPERTIES CXX_EXTENSIONS OFF)
+
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    add_library(adas_can src/can_receiver.cpp)
+    target_include_directories(adas_can PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include")
+    target_compile_features(adas_can PUBLIC cxx_std_17)
+    set_target_properties(adas_can PROPERTIES CXX_EXTENSIONS OFF)
+endif()
+
+if(BUILD_TESTING)
+    find_package(GTest CONFIG REQUIRED)
+    include(GoogleTest)
+    add_executable(test_can_decoder tests/test_can_decoder.cpp)
+    target_link_libraries(test_can_decoder PRIVATE adas_decoder GTest::gtest_main)
+    gtest_discover_tests(test_can_decoder)
+endif()
